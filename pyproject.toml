@@ -1,0 +1,44 @@
+[project]
+name = "par-runner"
+version = "0.1.0"
+description = "Parallel command runner"
+authors = [
+    { name = "Naz Quadri", email = "naz.quadri@gmail.com" }
+]
+dependencies = [
+    "typer>=0.9.0",
+    "fastapi>=0.110.0",
+    "rich>=13.7.1",
+    "uvicorn[standard]>=0.29.0",
+    "jinja2>=3.1.3",
+]
+readme = "README.md"
+requires-python = ">= 3.9"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = [
+    "pytest>=8.1.1",
+    "pytest-benchmark>=4.0.0",
+    "flake8>=7.0.0",
+    "black>=24.3.0",
+    "isort>=5.13.2",
+    "pylint>=3.1.0",
+    "ruff>=0.3.4",
+    "mypy>=1.9.0",
+    "types-toml>=0.10.8.20240310",
+]
+
+[project.scripts]
+"par-run" = "par_run.cli:cli_app"
+
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/par_run"]

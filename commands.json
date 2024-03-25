@@ -1,0 +1,43 @@
+[
+    {
+        "group": "Formatting",
+        "cmds": [
+            {
+                "name": "Black",
+                "cmd": "black src py_tests"
+            }
+        ]
+    },
+    {
+        "group": "Sorting",
+        "cmds": [
+            {
+                "name": "Isort",
+                "cmd": "isort src py_tests"
+            }
+        ]
+    },
+    {
+        "group": "Quality",
+        "cmds": [
+            {
+                "name": "Flake8",
+                "cmd": "flake8 src py_tests"
+            },
+            {
+                "name": "Mypy",
+                "cmd": "mypy src"
+            },
+            {
+                "name": "Pylint",
+                "cmd": "pylint src py_tests"
+            },
+            {
+                "name": "Pytest",
+                "cmd": "pytest py_tests"
+            }
+        
+        ]
+    }
+]
+

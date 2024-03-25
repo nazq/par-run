@@ -1,0 +1,12 @@
+[[group.formatting]]
+Black = "black src py_tests"
+
+[[group.sorting]]
+Isort = "isort src py_tests"
+
+
+[[group.quality]]
+Flake8 = "flake8 src py_tests"
+Mypy = "mypy src"
+Pylint = "pylint src py_tests"
+Pytest = "pytest py_tests"

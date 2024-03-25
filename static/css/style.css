@@ -1,0 +1,167 @@
+/* General body styling */
+body {
+    background-color: #f4f7f6;
+    font-family: 'Roboto', sans-serif; /* Example using Roboto font */
+    color: #333;
+}
+
+/* Container and Spacing */
+.container {
+    margin-top: 20px;
+}
+
+/* Configuration and Runner Tabs */
+#configTab, #runnerTab {
+    padding: 20px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Textarea for Command Configurations */
+#commandsConfig {
+    width: 100%;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    padding: 10px;
+    margin-top: 10px;
+}
+
+/* Buttons */
+button {
+    margin-right: 10px;
+}
+
+/* Collapsible sections for command outputs */
+.command-section {
+    margin-bottom: 15px;
+}
+
+.collapsible {
+    background-color: #007bff;
+    color: white;
+    cursor: pointer;
+    padding: 18px;
+    width: 100%;
+    border: none;
+    text-align: left;
+    outline: none;
+    font-size: 15px;
+    border-radius: 5px;
+    transition: background-color 0.3s ease;
+}
+
+.collapsible:hover {
+    background-color: #0056b3;
+}
+
+.collapsible:after {
+    content: '\002B';
+    color: white;
+    font-weight: bold;
+    float: right;
+    margin-left: 5px;
+}
+
+.collapsible.active:after {
+    content: "\2212";
+}
+
+.content {
+    padding: 0 18px;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.2s ease-out;
+    background-color: #f9f9f9;
+    border-radius: 0 0 5px 5px;
+}
+
+.command-output {
+    padding: 10px;
+    overflow-y: auto; /* Scrollable content */
+}
+
+/* Scrollbar Styles */
+.command-output::-webkit-scrollbar {
+    width: 5px;
+}
+
+.command-output::-webkit-scrollbar-thumb {
+    background: #007bff;
+    border-radius: 5px;
+}
+
+.command-output::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+/* Style for the collapsible command output container */
+.collapse .custom-card.card-body {
+    max-height: 300px; /* Set a fixed maximum height */
+    overflow-y: auto; /* Enable vertical scrolling within the container */
+    margin-bottom: 1rem;
+}
+
+/* Optional: Improve the appearance of the scrollbar */
+.collapse .card.card-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.collapse .card.card-body::-webkit-scrollbar-thumb {
+    background: #007bff; /* Use your theme color */
+    border-radius: 4px;
+}
+
+.collapse .card.card-body::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+/* Align text boxes and make colors modern */
+.table {
+    width: 100%; /* Ensure tables fill their container */
+    border-collapse: collapse;
+    border-spacing: 0;
+    border: 1px solid #dee2e6; /* Border color */
+}
+
+.table th, .table td {
+    padding: .75rem; /* Padding around table cells */
+    vertical-align: top; /* Align content at the top of table cells */
+    border-top: 1px solid #dee2e6; /* Border color */
+}
+
+.table th {
+    background-color: #f8f9fa; /* Header background color */
+    border-color: #dee2e6; /* Border color */
+    text-align: left; /* Align header text to the left */
+}
+
+.table tbody tr:nth-child(even) {
+    background-color: #f8f9fa; /* Even rows background color */
+}
+
+.table tbody tr:hover {
+    background-color: #e2e6ea; /* Hover color for rows */
+}
+
+.form-control {
+    display: block; /* Display input elements as block elements */
+    width: 100%; /* Take up full width */
+    padding: .375rem .75rem; /* Padding for input elements */
+    font-size: 1rem; /* Font size */
+    line-height: 1.5; /* Line height */
+    color: #495057; /* Text color */
+    background-color: #fff; /* Background color */
+    background-clip: padding-box; /* Ensure background extends to padding */
+    border: 1px solid #ced4da; /* Border color */
+    border-radius: .25rem; /* Border radius */
+    transition: border-color .15s ease-in-out,box-shadow .15s ease-in-out; /* Transition effect for border and shadow */
+}
+
+.form-control:focus {
+    color: #495057; /* Text color on focus */
+    background-color: #fff; /* Background color on focus */
+    border-color: #80bdff; /* Border color on focus */
+    outline: 0; /* Remove outline on focus */
+    box-shadow: 0 0 0 .2rem rgba(0,123,255,.25); /* Add shadow on focus */
+}
