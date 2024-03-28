@@ -3,17 +3,28 @@
 import asyncio
 import configparser
 import enum
+import multiprocessing as mp
+import queue
 import subprocess
 from collections import OrderedDict
 from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
 from queue import Queue
-from typing import List, Optional, Union
+from typing import List, Optional, Protocol, TypeVar, Union
 
-import rich
 from pydantic import BaseModel, ConfigDict, Field
 
-generic_pool = ProcessPoolExecutor()
+# Type alias for a generic future.
+GenFuture = Union[Future, asyncio.Future]
+
+ContextT = TypeVar("ContextT")
+
+
+class ProcessingStrategy(enum.Enum):
+    """Enum for processing strategies."""
+
+    AS_COMPLETED = "As Completed"
+    ON_RECV = "On Receive"
 
 
 class CommandStatus(enum.Enum):
@@ -29,9 +40,6 @@ class CommandStatus(enum.Enum):
         return self in [CommandStatus.SUCCESS, CommandStatus.FAILURE]
 
 
-GenFuture = Union[Future, asyncio.Future]
-
-
 class Command(BaseModel):
     """Holder for a command and its name."""
 
@@ -40,16 +48,19 @@ class Command(BaseModel):
     name: str
     cmd: str
     status: CommandStatus = CommandStatus.NOT_STARTED
-    output: List[str] = []
-    num_non_empty_lines: int = 0
-    ret_code: Optional[int] = None
+    unflushed: List[str] = Field(default=[], exclude=True)
+    num_non_empty_lines: int = Field(default=0, exclude=True)
+    ret_code: Optional[int] = Field(default=None, exclude=True)
     fut: Optional[GenFuture] = Field(default=None, exclude=True)
 
-    def append_output(self, line: str) -> None:
-        """Append a line to the output and increment the non-empty line count."""
-        self.output.append(line)
+    def incr_line_count(self, line: str) -> None:
+        """Increment the non-empty line count."""
         if line.strip():
             self.num_non_empty_lines += 1
+
+    def append_unflushed(self, line: str) -> None:
+        """Append a line to the output and increment the non-empty line count."""
+        self.unflushed.append(line)
 
     def set_ret_code(self, ret_code: int):
         """Set the return code and status of the command."""
@@ -67,25 +78,166 @@ class Command(BaseModel):
         self.status = CommandStatus.RUNNING
 
 
+class CommandCB(Protocol):
+    def on_start(self, cmd: Command) -> None: ...
+    def on_recv(self, cmd: Command, output: str) -> None: ...
+    def on_term(self, cmd: Command, exit_code: int) -> None: ...
+
+
+class CommandAsyncCB(Protocol):
+    async def on_start(self, cmd: Command) -> None: ...
+    async def on_recv(self, cmd: Command, output: str) -> None: ...
+    async def on_term(self, cmd: Command, exit_code: int) -> None: ...
+
+
 class CommandGroup(BaseModel):
     """Holder for a group of commands."""
 
     name: str
     cmds: OrderedDict[str, Command]
 
-    def cancel_running(self) -> int:
-        """Cancel all running commands in the group and return the exit code."""
-        exit_code = 999
-        for _, cmd in self.cmds.items():
-            if cmd.status == CommandStatus.RUNNING:
-                rich.print(
-                    f"[red bold]Command {cmd} timed out, cancelling, ret_code == {exit_code}[/]"
-                )
-                if cmd.fut:
-                    cmd.fut.cancel()
-                    cmd.fut = None
-                cmd.set_ret_code(exit_code)
-        return exit_code
+    async def run_async(
+        self,
+        strategy: ProcessingStrategy,
+        callbacks: CommandCB,
+    ):
+        q = mp.Manager().Queue()
+        pool = ProcessPoolExecutor()
+        futs = [
+            asyncio.get_event_loop().run_in_executor(pool, run_command, cmd.name, cmd.cmd, q)
+            for _, cmd in self.cmds.items()
+        ]
+
+        for (_, cmd), fut in zip(self.cmds.items(), futs):
+            cmd.fut = fut
+            cmd.set_running()
+
+        return await self._process_q_async(q, strategy, callbacks)
+
+    def run(
+        self,
+        strategy: ProcessingStrategy,
+        callbacks: CommandCB,
+    ):
+        q = mp.Manager().Queue()
+        pool = ProcessPoolExecutor()
+        futs = [pool.submit(run_command, cmd.name, cmd.cmd, q) for _, cmd in self.cmds.items()]
+        for (_, cmd), fut in zip(self.cmds.items(), futs):
+            cmd.fut = fut
+            cmd.set_running()
+
+        return self._process_q(q, strategy, callbacks)
+
+    def _process_q(
+        self,
+        q: Queue,
+        strategy: ProcessingStrategy,
+        callbacks: CommandCB,
+    ) -> int:
+        grp_exit_code = 0
+
+        if strategy == ProcessingStrategy.ON_RECV:
+            for _, cmd in self.cmds.items():
+                callbacks.on_start(cmd)
+
+        while True:
+            try:
+                q_result = q.get(block=True, timeout=10)
+            except queue.Empty:
+                continue
+
+            # Can only get here with a valid message from the Q
+            cmd_name = q_result[0]
+            # print(q_result, type(q_result[0]), type(q_result[1]))
+            exit_code: Optional[int] = q_result[1] if isinstance(q_result[1], int) else None
+            output_line: Optional[str] = q_result[1] if isinstance(q_result[1], str) else None
+            # print(output_line, exit_code)
+            if exit_code is None and output_line is None:
+                raise ValueError("Invalid Q message")
+
+            cmd = self.cmds[cmd_name]
+            if strategy == ProcessingStrategy.ON_RECV:
+                if exit_code is None:
+                    cmd.incr_line_count(output_line)
+                    callbacks.on_recv(cmd, output_line)
+                else:
+                    cmd.set_ret_code(exit_code)
+                    callbacks.on_term(cmd, exit_code)
+                    if exit_code != 0:
+                        grp_exit_code = 1
+
+            if strategy == ProcessingStrategy.AS_COMPLETED:
+                if exit_code is None:
+                    cmd.incr_line_count(output_line)
+                    cmd.append_unflushed(output_line)
+                else:
+                    callbacks.on_start(cmd)
+                    for line in cmd.unflushed:
+                        callbacks.on_recv(cmd, line)
+                    callbacks.on_term(cmd, exit_code)
+                    cmd.set_ret_code(exit_code)
+                    if exit_code != 0:
+                        grp_exit_code = 1
+
+            if all(cmd.status.completed() for _, cmd in self.cmds.items()):
+                break
+        return grp_exit_code
+
+    async def _process_q_async(
+        self,
+        q: Queue,
+        strategy: ProcessingStrategy,
+        callbacks: CommandAsyncCB,
+    ) -> int:
+        grp_exit_code = 0
+
+        if strategy == ProcessingStrategy.ON_RECV:
+            for _, cmd in self.cmds.items():
+                await callbacks.on_start(cmd)
+
+        while True:
+            await asyncio.sleep(0)
+            try:
+                q_result = q.get(block=True, timeout=10)
+            except queue.Empty:
+                continue
+
+            # Can only get here with a valid message from the Q
+            cmd_name = q_result[0]
+            # print(q_result, type(q_result[0]), type(q_result[1]))
+            exit_code: Optional[int] = q_result[1] if isinstance(q_result[1], int) else None
+            output_line: Optional[str] = q_result[1] if isinstance(q_result[1], str) else None
+            # print(output_line, exit_code)
+            if exit_code is None and output_line is None:
+                raise ValueError("Invalid Q message")
+
+            cmd = self.cmds[cmd_name]
+            if strategy == ProcessingStrategy.ON_RECV:
+                if exit_code is None:
+                    cmd.incr_line_count(output_line)
+                    await callbacks.on_recv(cmd, output_line)
+                else:
+                    cmd.set_ret_code(exit_code)
+                    await callbacks.on_term(cmd, exit_code)
+                    if exit_code != 0:
+                        grp_exit_code = 1
+
+            if strategy == ProcessingStrategy.AS_COMPLETED:
+                if exit_code is None:
+                    cmd.incr_line_count(output_line)
+                    cmd.append_unflushed(output_line)
+                else:
+                    await callbacks.on_start(cmd)
+                    for line in cmd.unflushed:
+                        await callbacks.on_recv(cmd, line)
+                    await callbacks.on_term(cmd, exit_code)
+                    cmd.set_ret_code(exit_code)
+                    if exit_code != 0:
+                        grp_exit_code = 1
+
+            if all(cmd.status.completed() for _, cmd in self.cmds.items()):
+                break
+        return grp_exit_code
 
 
 def read_commands_ini(filename: Union[str, Path]) -> list[CommandGroup]:
@@ -145,7 +297,7 @@ def run_command(name: str, command: str, q: Queue) -> None:
     """
 
     with subprocess.Popen(
-        f"rye run {command}",
+        f"{command}",
         shell=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -158,5 +310,6 @@ def run_command(name: str, command: str, q: Queue) -> None:
             process.wait()
             ret_code = process.returncode
             if ret_code is not None:
-                q.put((name, ret_code))
-            raise ValueError("Process has no return code")
+                q.put((name, int(ret_code)))
+            else:
+                raise ValueError("Process has no return code")  # pragma: no cover

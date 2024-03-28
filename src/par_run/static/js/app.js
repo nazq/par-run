@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch('/get-commands-config')
             .then(response => response.json())
             .then(configGroups => {
+                console.log('Loaded configuration:', configGroups);
                 createConfigWidgets(configGroups);
             })
             .catch(error => console.error('Error loading configuration:', error));
@@ -30,9 +31,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    
-    
-
     // Dynamically create widgets for command configurations
     function createConfigWidgets(configGroups) {
         const container = document.getElementById('configGroups');
@@ -40,23 +38,29 @@ document.addEventListener('DOMContentLoaded', function() {
 
         configGroups.forEach(group => {
             const table = document.createElement('table');
-            table.className = 'table';
+            table.className = 'table table-bordered'; // Added table-bordered for better visibility
             
             const thead = document.createElement('thead');
-            thead.innerHTML = `<tr><th colspan="2">${group.name}</th></tr>`;
+            thead.innerHTML = `<tr class="table-active"><th colspan="2">${group.name}</th></tr>`; // Added class for header styling
             table.appendChild(thead);
 
             const tbody = document.createElement('tbody');
-            group.cmds.forEach(command => {
+            Object.entries(group.cmds).forEach(([commandName, command]) => {
                 const tr = document.createElement('tr');
+                // Command name cell with class
                 const tdName = document.createElement('td');
-                tdName.textContent = command.name;
+                tdName.textContent = commandName;
+                tdName.className = 'command-name'; // Apply command name class
+                
+                // Command input cell with class
                 const tdCmd = document.createElement('td');
+                tdCmd.className = 'command-input'; // Apply command input class
+
                 const inputCmd = document.createElement('input');
                 inputCmd.type = 'text';
                 inputCmd.className = 'form-control';
                 inputCmd.value = command.cmd;
-                inputCmd.dataset.commandName = command.name;
+                inputCmd.dataset.commandName = commandName; // Use command name as key
                 tdCmd.appendChild(inputCmd);
                 tr.appendChild(tdName);
                 tr.appendChild(tdCmd);

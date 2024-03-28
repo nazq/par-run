@@ -1,3 +1,3 @@
-# py-runner
+# par-run
 
 Describe your project here.

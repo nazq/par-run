@@ -1,19 +1,32 @@
 """Web UI Module"""
 
-import asyncio
-import multiprocessing as mp
-import queue
+from pathlib import Path
 
-from fastapi import Body, FastAPI, Request, WebSocket, WebSocketDisconnect
+import rich
+from fastapi import Body, FastAPI, Request, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .executor import (CommandGroup, generic_pool, read_commands_ini,
-                       run_command, write_commands_ini)
+from .executor import (
+    Command,
+    CommandGroup,
+    ProcessingStrategy,
+    read_commands_ini,
+    write_commands_ini,
+)
+
+BASE_PATH = Path(__file__).resolve().parent
 
 ws_app = FastAPI()
-ws_app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+ws_app.mount("/static", StaticFiles(directory=str(BASE_PATH / "static")), name="static")
+templates = Jinja2Templates(directory=str(BASE_PATH / "templates"))
+
+
+@ws_app.get("/")
+async def ws_main(request: Request):
+    """Get the main page."""
+    print("Main page")
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @ws_app.get("/get-commands-config")
@@ -29,82 +42,31 @@ async def update_commands_config(updated_config: list[CommandGroup] = Body(...))
     return {"message": "Configuration updated successfully"}
 
 
+class WebCommandCB:
+    """Websocket command callbacks."""
+
+    def __init__(self, ws: WebSocket):
+        self.ws = ws
+
+    async def on_start(self, cmd: Command):
+        rich.print(f"[blue bold]Started command {cmd.name}[/]")
+
+    async def on_recv(self, cmd: Command, output: str):
+        await self.ws.send_json({"commandName": cmd.name, "output": output})
+
+    async def on_term(self, cmd: Command, exit_code: int):
+        await self.ws.send_json({"commandName": cmd.name, "output": {"ret_code": exit_code}})
+
+
 @ws_app.websocket_route("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Websocket endpoint to run commands."""
-    loop = asyncio.get_event_loop()
-
-    # To use Queue's across processes, you need to use the mp.Manager()
-    q = mp.Manager().Queue()
-
-    groups = read_commands_ini("commands.ini")
+    rich.print("Websocket connection")
+    master_groups = read_commands_ini("commands.ini")
+    print(master_groups)
     await websocket.accept()
-
-    for commands in groups:
-        print(f"Running group: {commands.name}")
-        futs = [
-            loop.run_in_executor(generic_pool, run_command, cmd.name, cmd.cmd, q)
-            for _, cmd in commands.cmds.items()
-        ]
-
-        for (_, cmd), fut in zip(commands.cmds.items(), futs):
-            cmd.fut = fut
-
-        while True:
-
-            # None of the coroutines called in this block (e.g. send_json())
-            # will yield back control. asyncio.sleep() does, and so it will allow
-            # the event loop to switch context and serve multiple requests
-            # concurrently.
-            await asyncio.sleep(0)
-
-            try:
-                # see if our long running task has some intermediate result.
-                # Will result None if there isn't any.
-                # print("Checking for intermediate result")
-                q_result = q.get(block=True, timeout=30)
-            except queue.Empty:
-                # if q.get() throws Empty exception, then nothing was
-                q_result = None
-
-            # If there is an intermediate result, let's send it to the client.
-            if q_result:
-                try:
-                    if isinstance(q_result[1], int):
-                        ret_code = q_result[1]
-                        commands.cmds[q_result[0]].set_ret_code(ret_code)
-                        await websocket.send_json(
-                            {
-                                "commandName": q_result[0],
-                                "output": {"ret_code": ret_code},
-                            }
-                        )
-                    else:
-                        await websocket.send_json(
-                            {"commandName": q_result[0], "output": q_result[1]}
-                        )
-                    # check status of all commands if non are NOT_STARTED, break out of the loop
-                    if all(
-                        commands.cmds[cmd].status.completed() for cmd in commands.cmds
-                    ):
-                        print(f"All commands have been run in {commands.name}")
-                        break
-
-                except WebSocketDisconnect as e:
-                    # This happens if client has moved on, we should stop the long
-                    #  running task
-                    print(f"Client disconnected: {e}")
-                    _ = [result.cancel() for result in futs]
-                    # break out of the while loop.
-                    break
-
-    try:
-        await websocket.close()
-    except WebSocketDisconnect:
-        pass
-
-
-@ws_app.get("/")
-async def ws_main(request: Request):
-    """Get the main page."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    cb = WebCommandCB(websocket)
+    print("Running commands")
+    exit_code = 0
+    for grp in master_groups:
+        exit_code = exit_code or await grp.run_async(ProcessingStrategy.ON_RECV, cb)

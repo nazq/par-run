@@ -118,12 +118,21 @@ button {
 
 /* Align text boxes and make colors modern */
 .table {
-    width: 100%; /* Ensure tables fill their container */
-    border-collapse: collapse;
-    border-spacing: 0;
-    border: 1px solid #dee2e6; /* Border color */
-}
+    width: 100%;
+    table-layout: fixed; /* This helps enforce the widths you set */
+  }
 
+/* Set the width of the command name column */
+.command-name {
+    width: 20%; /* or whatever width you prefer */
+  }
+  
+/* Ensure the input field takes up the full width of its cell */
+.command-input input {
+    width: 100%;
+    box-sizing: border-box; /* Include padding and borders in the element's total width */
+  }
+  
 .table th, .table td {
     padding: .75rem; /* Padding around table cells */
     vertical-align: top; /* Align content at the top of table cells */
