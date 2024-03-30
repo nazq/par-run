@@ -3,7 +3,7 @@
 #
 # last locked with the following flags:
 #   pre: false
-#   features: []
+#   features: ["web"]
 #   all-features: false
 #   with-sources: false
 
@@ -16,11 +16,8 @@ anyio==4.3.0
 click==8.1.7
     # via typer
     # via uvicorn
-coverage==7.4.4
-    # via pytest-cov
 exceptiongroup==1.2.0
     # via anyio
-    # via pytest
 fastapi==0.110.0
     # via par-run
 h11==0.14.0
@@ -29,8 +26,6 @@ httptools==0.6.1
     # via uvicorn
 idna==3.6
     # via anyio
-iniconfig==2.0.0
-    # via pytest
 jinja2==3.1.3
     # via par-run
 markdown-it-py==3.0.0
@@ -39,10 +34,6 @@ markupsafe==2.1.5
     # via jinja2
 mdurl==0.1.2
     # via markdown-it-py
-packaging==24.0
-    # via pytest
-pluggy==1.4.0
-    # via pytest
 psutil==5.9.8
     # via par-run
 pydantic==2.6.4
@@ -51,10 +42,6 @@ pydantic-core==2.16.3
     # via pydantic
 pygments==2.17.2
     # via rich
-pytest==8.1.1
-    # via pytest-cov
-pytest-cov==5.0.0
-    # via par-run
 python-dotenv==1.0.1
     # via uvicorn
 pyyaml==6.0.1
@@ -65,9 +52,6 @@ sniffio==1.3.1
     # via anyio
 starlette==0.36.3
     # via fastapi
-tomli==2.0.1
-    # via coverage
-    # via pytest
 typer==0.9.0
     # via par-run
 typing-extensions==4.10.0

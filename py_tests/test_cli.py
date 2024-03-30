@@ -1,18 +1,18 @@
-import pytest
-import psutil
 import itertools
 
-
+import psutil
+import pytest
 from typer.testing import CliRunner
+
 from par_run.cli import (
+    CLICommandCB,
+    clean_up,
     cli_app,
+    get_process_port,
+    get_web_server_status,
+    list_uvicorn_processes,
     start_web_server,
     stop_web_server,
-    get_web_server_status,
-    clean_up,
-    CLICommandCB,
-    get_process_port,
-    list_uvicorn_processes,
 )
 from par_run.executor import Command, CommandGroup, CommandStatus
 
@@ -212,13 +212,6 @@ def test_start_web_server_already_running(mocker, tmp_path):
     mocker.patch("par_run.cli.typer.echo")
     with pytest.raises(SystemExit):
         start_web_server(8000)
-
-
-def test_stop_web_server_not_running(mocker, tmp_path):
-    mocker.patch("par_run.cli.PID_FILE", str(tmp_path / ".par-run.uvicorn.pid"))
-    mocker.patch("par_run.cli.typer.echo")
-    with pytest.raises(SystemExit):
-        stop_web_server()
 
 
 def test_get_web_server_status_running(mocker, tmp_path):

@@ -7,13 +7,7 @@ from fastapi import Body, FastAPI, Request, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .executor import (
-    Command,
-    CommandGroup,
-    ProcessingStrategy,
-    read_commands_ini,
-    write_commands_ini,
-)
+from .executor import Command, CommandGroup, ProcessingStrategy, read_commands_ini, write_commands_ini
 
 BASE_PATH = Path(__file__).resolve().parent
 

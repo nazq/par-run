@@ -1,9 +1,10 @@
-from fastapi.testclient import TestClient
-import pytest
-from par_run.web import ws_app, WebCommandCB
-from par_run.executor import Command, CommandStatus
-
 from unittest.mock import MagicMock
+
+import pytest
+from fastapi.testclient import TestClient
+
+from par_run.executor import Command, CommandStatus
+from par_run.web import WebCommandCB, ws_app
 
 
 @pytest.fixture
@@ -78,6 +79,7 @@ async def test_websocket_endpoint(mocker):
     # Verify that run_async was called if it's part of the WebSocket interaction
     mock_run_async.assert_awaited()
 
+
 @pytest.mark.skip(reason="WebSocket testing is not yet implemented")
 @pytest.mark.asyncio
 async def test_webcommandcb_on_start(async_mock):
@@ -91,7 +93,7 @@ async def test_webcommandcb_on_start(async_mock):
 
     # Since ws.send_json is an async mock, you should check if it's awaited with the expected arguments
     ws.send_json.assert_awaited_with({"commandName": cmd.name, "output": "[blue bold]Started command test_cmd[/]"})
-    
+
 
 @pytest.mark.asyncio
 async def test_webcommandcb_on_recv(async_mock):
@@ -109,7 +111,11 @@ async def test_webcommandcb_on_recv(async_mock):
 
     # Assert WebSocket send_json was called with the expected data
     assert ws.send_json.called
-    assert ws.send_json.call_args[0][0] == {"commandName": "test_cmd", "output": "Hello World"}
+    assert ws.send_json.call_args[0][0] == {
+        "commandName": "test_cmd",
+        "output": "Hello World",
+    }
+
 
 @pytest.mark.asyncio
 async def test_webcommandcb_on_term(async_mock):
@@ -127,4 +133,7 @@ async def test_webcommandcb_on_term(async_mock):
 
     # Assert WebSocket send_json was called with the expected data
     assert ws.send_json.called
-    assert ws.send_json.call_args[0][0] == {"commandName": "test_cmd", "output": {"ret_code": 0}}
+    assert ws.send_json.call_args[0][0] == {
+        "commandName": "test_cmd",
+        "output": {"ret_code": 0},
+    }

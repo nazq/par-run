@@ -62,6 +62,10 @@ class Command(BaseModel):
         """Append a line to the output and increment the non-empty line count."""
         self.unflushed.append(line)
 
+    def clear_unflushed(self) -> None:
+        """Clear the unflushed output."""
+        self.unflushed.clear()
+
     def set_ret_code(self, ret_code: int):
         """Set the return code and status of the command."""
         self.ret_code = ret_code
@@ -99,7 +103,7 @@ class CommandGroup(BaseModel):
     async def run_async(
         self,
         strategy: ProcessingStrategy,
-        callbacks: CommandCB,
+        callbacks: CommandAsyncCB,
     ):
         q = mp.Manager().Queue()
         pool = ProcessPoolExecutor()
@@ -153,31 +157,36 @@ class CommandGroup(BaseModel):
             output_line: Optional[str] = q_result[1] if isinstance(q_result[1], str) else None
             # print(output_line, exit_code)
             if exit_code is None and output_line is None:
-                raise ValueError("Invalid Q message")
+                raise ValueError("Invalid Q message")  # pragma: no cover
 
             cmd = self.cmds[cmd_name]
             if strategy == ProcessingStrategy.ON_RECV:
-                if exit_code is None:
+                if output_line is not None:
                     cmd.incr_line_count(output_line)
                     callbacks.on_recv(cmd, output_line)
-                else:
+                elif exit_code is not None:
                     cmd.set_ret_code(exit_code)
                     callbacks.on_term(cmd, exit_code)
                     if exit_code != 0:
                         grp_exit_code = 1
+                else:
+                    raise ValueError("Invalid Q message")  # pragma: no cover
 
             if strategy == ProcessingStrategy.AS_COMPLETED:
-                if exit_code is None:
+                if output_line is not None:
                     cmd.incr_line_count(output_line)
                     cmd.append_unflushed(output_line)
-                else:
+                elif exit_code is not None:
                     callbacks.on_start(cmd)
                     for line in cmd.unflushed:
                         callbacks.on_recv(cmd, line)
+                    cmd.clear_unflushed()
                     callbacks.on_term(cmd, exit_code)
                     cmd.set_ret_code(exit_code)
                     if exit_code != 0:
                         grp_exit_code = 1
+                else:
+                    raise ValueError("Invalid Q message")  # pragma: no cover
 
             if all(cmd.status.completed() for _, cmd in self.cmds.items()):
                 break
@@ -209,31 +218,36 @@ class CommandGroup(BaseModel):
             output_line: Optional[str] = q_result[1] if isinstance(q_result[1], str) else None
             # print(output_line, exit_code)
             if exit_code is None and output_line is None:
-                raise ValueError("Invalid Q message")
+                raise ValueError("Invalid Q message")  # pragma: no cover
 
             cmd = self.cmds[cmd_name]
             if strategy == ProcessingStrategy.ON_RECV:
-                if exit_code is None:
+                if output_line is not None:
                     cmd.incr_line_count(output_line)
                     await callbacks.on_recv(cmd, output_line)
-                else:
+                elif exit_code is not None:
                     cmd.set_ret_code(exit_code)
                     await callbacks.on_term(cmd, exit_code)
                     if exit_code != 0:
                         grp_exit_code = 1
+                else:
+                    raise ValueError("Invalid Q message")  # pragma: no cover
 
             if strategy == ProcessingStrategy.AS_COMPLETED:
-                if exit_code is None:
+                if output_line is not None:
                     cmd.incr_line_count(output_line)
                     cmd.append_unflushed(output_line)
-                else:
+                elif exit_code is not None:
                     await callbacks.on_start(cmd)
                     for line in cmd.unflushed:
                         await callbacks.on_recv(cmd, line)
+                    cmd.clear_unflushed()
                     await callbacks.on_term(cmd, exit_code)
                     cmd.set_ret_code(exit_code)
                     if exit_code != 0:
                         grp_exit_code = 1
+                else:
+                    raise ValueError("Invalid Q message")  # pragma: no cover
 
             if all(cmd.status.completed() for _, cmd in self.cmds.items()):
                 break

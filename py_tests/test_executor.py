@@ -1,14 +1,16 @@
 import multiprocessing as mp
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor
+
 import pytest
+
 from par_run.executor import (
     Command,
     CommandGroup,
     CommandStatus,
-    run_command,
     ProcessingStrategy,
     read_commands_ini,
+    run_command,
     write_commands_ini,
 )
 
@@ -62,14 +64,23 @@ def test_command_set_ret_code_success():
 
 
 def test_command_set_ret_code_failure():
-    command = Command(name="test", cmd="echo 'Hello, World!'")
-    assert command.ret_code is None
-    assert command.status == CommandStatus.NOT_STARTED
+    command = Command(name="test", cmd="exit 1")
+    q = mp.Manager().Queue()
+    pool = ProcessPoolExecutor()
+    fut = pool.submit(run_command, command.name, command.cmd, q)
+    command.fut = fut
+    _ = fut.result()
+    msg = q.get()
 
-    command.set_ret_code(1)
-    assert command.ret_code == 1
+    assert isinstance(msg, tuple)
+    assert len(msg) == 2
+    assert msg[0] == command.name
+    exit_code = msg[1]
+    command.set_ret_code(exit_code)
+    assert command.ret_code == exit_code
     assert command.status == CommandStatus.FAILURE
     assert command.fut is None
+    assert command.status.completed()
 
 
 def test_command_set_running():
@@ -82,32 +93,50 @@ def test_command_set_running():
 
 class TestCommandCB:
     def on_start(self, cmd: Command):
-        print(f"Test start command {cmd.name}")
+        assert cmd
+        assert cmd.name.startswith("test")
 
     def on_recv(self, cmd: Command, output: str):
-        print(f"{cmd.name}: {output}")
+        assert cmd
+        assert cmd.name.startswith("test")
+        assert output
 
     def on_term(self, cmd: Command, exit_code: int):
+        assert cmd
+        assert cmd.name.startswith("test")
+        assert isinstance(exit_code, int)
+
         """Callback function for when a command receives output"""
         if cmd.status == CommandStatus.SUCCESS:
-            print(f"Command {cmd.name} finished")
+            assert cmd.status.completed()
+            assert cmd.ret_code == 0
         elif cmd.status == CommandStatus.FAILURE:
-            print(f"Command {cmd.name} failed, {exit_code=:}")
+            assert cmd.status.completed()
+            assert cmd.ret_code != 0
 
 
 class TestCommandCBAsync:
     async def on_start(self, cmd: Command):
-        print(f"Test start command {cmd.name}")
+        assert cmd
+        assert cmd.name.startswith("test")
 
     async def on_recv(self, cmd: Command, output: str):
-        print(f"{cmd.name}: {output}")
+        assert cmd
+        assert cmd.name.startswith("test")
+        assert output
 
     async def on_term(self, cmd: Command, exit_code: int):
+        assert cmd
+        assert cmd.name.startswith("test")
+        assert isinstance(exit_code, int)
+
         """Callback function for when a command receives output"""
         if cmd.status == CommandStatus.SUCCESS:
-            print(f"Command {cmd.name} finished")
+            assert cmd.status.completed()
+            assert cmd.ret_code == 0
         elif cmd.status == CommandStatus.FAILURE:
-            print(f"Command {cmd.name} failed, {exit_code=:}")
+            assert cmd.status.completed()
+            assert cmd.ret_code != 0
 
 
 def test_command_group():
@@ -117,7 +146,15 @@ def test_command_group():
     commands[command1.name] = command1
     commands[command2.name] = command2
     group = CommandGroup(name="test_group", cmds=commands)
-    group.run(ProcessingStrategy.AS_COMPLETED, TestCommandCB())
+    group_exit = group.run(ProcessingStrategy.AS_COMPLETED, TestCommandCB())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.fut is None for cmd in group.cmds.values())
+    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+    assert group_exit == 0
 
     command1 = Command(name="test1", cmd="echo 'Hello, World!'")
     command2 = Command(name="test2", cmd="echo 'World, Hey!'")
@@ -125,7 +162,49 @@ def test_command_group():
     commands[command1.name] = command1
     commands[command2.name] = command2
     group = CommandGroup(name="test_group", cmds=commands)
-    group.run(ProcessingStrategy.ON_RECV, TestCommandCB())
+    group_exit = group.run(ProcessingStrategy.ON_RECV, TestCommandCB())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.fut is None for cmd in group.cmds.values())
+    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+    assert group_exit == 0
+
+
+def test_command_group_part_fail():
+    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
+    command2 = Command(name="test2", cmd="echo 'World, Hey!'; exit 1")
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    commands[command2.name] = command2
+    group = CommandGroup(name="test_group", cmds=commands)
+    group_exit = group.run(ProcessingStrategy.AS_COMPLETED, TestCommandCB())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.fut is None for cmd in group.cmds.values())
+    assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
+    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
+    assert group_exit == 1
+
+    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
+    command2 = Command(name="test2", cmd="echo 'World, Hey!'; exit 1")
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    commands[command2.name] = command2
+    group = CommandGroup(name="test_group", cmds=commands)
+    group_exit = group.run(ProcessingStrategy.ON_RECV, TestCommandCB())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.fut is None for cmd in group.cmds.values())
+    assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
+    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
+    assert group_exit == 1
 
 
 @pytest.mark.asyncio
@@ -137,6 +216,13 @@ async def test_command_group_async():
     commands[command2.name] = command2
     group = CommandGroup(name="test_group", cmds=commands)
     await group.run_async(ProcessingStrategy.AS_COMPLETED, TestCommandCBAsync())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.fut is None for cmd in group.cmds.values())
+    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
 
     command1 = Command(name="test1", cmd="echo 'Hello, World!'")
     command2 = Command(name="test2", cmd="echo 'World, Hey!'")
@@ -145,6 +231,48 @@ async def test_command_group_async():
     commands[command2.name] = command2
     group = CommandGroup(name="test_group", cmds=commands)
     await group.run_async(ProcessingStrategy.ON_RECV, TestCommandCBAsync())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.fut is None for cmd in group.cmds.values())
+    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+
+
+@pytest.mark.asyncio
+async def test_command_group_async_part_fail():
+    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
+    command2 = Command(name="test2", cmd="echo 'World, Hey!'; exit 1")
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    commands[command2.name] = command2
+    group = CommandGroup(name="test_group", cmds=commands)
+    group_exit = await group.run_async(ProcessingStrategy.AS_COMPLETED, TestCommandCBAsync())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.fut is None for cmd in group.cmds.values())
+    assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
+    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
+    assert group_exit == 1
+
+    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
+    command2 = Command(name="test2", cmd="echo 'World, Hey!'; exit 1")
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    commands[command2.name] = command2
+    group = CommandGroup(name="test_group", cmds=commands)
+    group_exit = await group.run_async(ProcessingStrategy.ON_RECV, TestCommandCBAsync())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.fut is None for cmd in group.cmds.values())
+    assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
+    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
+    assert group_exit == 1
 
 
 def test_run_command():
@@ -157,33 +285,7 @@ def test_run_command():
     assert msg[0] == "Test"
     assert msg[1] == "Hello, World!"
     exit_code = q.get()[1]
-
     assert exit_code == 0
-
-
-@pytest.fixture
-def command_data():
-    return {
-        "group.test": [
-            ("command1", "do something"),
-            ("command2", "do something else"),
-        ]
-    }
-
-
-@pytest.fixture
-def expected_command_groups():
-    return [
-        CommandGroup(
-            name="test",
-            cmds=OrderedDict(
-                [
-                    ("command1", Command(name="command1", cmd="do something")),
-                    ("command2", Command(name="command2", cmd="do something else")),
-                ]
-            ),
-        )
-    ]
 
 
 def test_read_commands_ini(mocker, command_data, expected_command_groups):

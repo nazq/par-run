@@ -1,15 +1,10 @@
 """CLI for running commands in parallel"""
 
-import os
-import signal
-import subprocess
-import sys
-import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
+import enum
 
-import psutil
 import rich
 import typer
 
@@ -20,71 +15,7 @@ PID_FILE = ".par-run.uvicorn.pid"
 cli_app = typer.Typer()
 
 
-@cli_app.command()
-def run(
-    show: bool = typer.Option(help="Show available groups and commands", default=False),
-    file: Path = typer.Option(help="The commands.ini file to use", default=Path("commands.ini")),
-    groups: Optional[str] = typer.Option(None, help="Run a specific group of commands, comma spearated"),
-    cmds: Optional[str] = typer.Option(None, help="Run a specific commands, comma spearated"),
-):
-    """Run commands in parallel"""
-    # Overall exit code, need to track all command exit codes to update this
-    exit_code = 0
-
-    master_groups = read_commands_ini(file)
-    if show:
-        for grp in master_groups:
-            rich.print(f"[blue bold]Group: {grp.name}[/]")
-            for _, cmd in grp.cmds.items():
-                rich.print(f"[green bold]{cmd.name}[/]: {cmd.cmd}")
-        return
-
-    if groups:
-        master_groups = [grp for grp in master_groups if grp.name in [g.strip() for g in groups.split(",")]]
-
-    if cmds:
-        for grp in master_groups:
-            grp.cmds = OrderedDict(
-                {
-                    cmd_name: cmd
-                    for cmd_name, cmd in grp.cmds.items()
-                    if cmd_name in [c.strip() for c in cmds.split(",")]
-                }
-            )
-        master_groups = [grp for grp in master_groups if grp.cmds]
-
-    #  q = mp.Manager().Queue()
-    cb = CLICommandCB()
-    for grp in master_groups:
-        exit_code = exit_code or grp.run(ProcessingStrategy.AS_COMPLETED, cb)
-
-    # Summarise the results
-    for grp in master_groups:
-        rich.print(f"[blue bold]Group: {grp.name}[/]")
-        for _, cmd in grp.cmds.items():
-            if cmd.status == CommandStatus.SUCCESS:
-                rich.print(f"[green bold]Command {cmd.name} succeeded ({cmd.num_non_empty_lines})[/]")
-            else:
-                rich.print(f"[red bold]Command {cmd.name} failed ({cmd.num_non_empty_lines})[/]")
-
-    sys.exit(exit_code)
-
-
-class CLICommandCB:
-    def on_start(self, cmd: Command):
-        rich.print(f"[blue bold]Completed command {cmd.name}[/]")
-
-    def on_recv(self, _: Command, output: str):
-        rich.print(output)
-
-    def on_term(self, cmd: Command, exit_code: int):
-        """Callback function for when a command receives output"""
-        if cmd.status == CommandStatus.SUCCESS:
-            rich.print(f"[green bold]Command {cmd.name} finished[/]")
-        elif cmd.status == CommandStatus.FAILURE:
-            rich.print(f"[red bold]Command {cmd.name} failed, {exit_code=:}[/]")
-
-
+# Web only functions
 def clean_up():
     """
     Clean up by removing the PID file.
@@ -131,15 +62,18 @@ def stop_web_server():
     """
     Stop the UVicorn server by reading its PID from the PID file and sending a termination signal.
     """
-    if not os.path.isfile(PID_FILE):
+    if not Path(PID_FILE).is_file():
         typer.echo("UVicorn server is not running.")
-        sys.exit(1)
+        return
 
     with open(PID_FILE, "r") as pid_file:
         pid = int(pid_file.read().strip())
 
     typer.echo(f"Stopping UVicorn server with {pid=:}...")
-    os.kill(pid, signal.SIGTERM)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
     clean_up()
 
 
@@ -192,21 +126,117 @@ def get_web_server_status():
             clean_up()
 
 
+class WebCommand(enum.Enum):
+    """Web command enumeration."""
+
+    START = "start"
+    STOP = "stop"
+    RESTART = "restart"
+    STATUS = "status"
+
+    def __str__(self):
+        return self.value
+
+
+class CLICommandCB:
+    def on_start(self, cmd: Command):
+        rich.print(f"[blue bold]Completed command {cmd.name}[/]")
+
+    def on_recv(self, _: Command, output: str):
+        rich.print(output)
+
+    def on_term(self, cmd: Command, exit_code: int):
+        """Callback function for when a command receives output"""
+        if cmd.status == CommandStatus.SUCCESS:
+            rich.print(f"[green bold]Command {cmd.name} finished[/]")
+        elif cmd.status == CommandStatus.FAILURE:
+            rich.print(f"[red bold]Command {cmd.name} failed, {exit_code=:}[/]")
+
+
 @cli_app.command()
-def web(
-    command: str = typer.Argument(..., help="Start/Stop the web server"),
-    port: int = typer.Option(8001, help="Port to run the web server"),
+def run(
+    show: bool = typer.Option(help="Show available groups and commands", default=False),
+    file: Path = typer.Option(help="The commands.ini file to use", default=Path("commands.ini")),
+    groups: Optional[str] = typer.Option(None, help="Run a specific group of commands, comma spearated"),
+    cmds: Optional[str] = typer.Option(None, help="Run a specific commands, comma spearated"),
 ):
-    """Run the web server"""
-    if command == "start":
-        start_web_server(port)
-    elif command == "stop":
-        stop_web_server()
-    elif command == "restart":
-        stop_web_server()
-        start_web_server(port)
-    elif command == "status":
-        get_web_server_status()
-    else:
-        typer.echo("Command must be either 'start' or 'stop'", err=True)
-        raise typer.Abort()
+    """Run commands in parallel"""
+    # Overall exit code, need to track all command exit codes to update this
+    exit_code = 0
+
+    master_groups = read_commands_ini(file)
+    if show:
+        for grp in master_groups:
+            rich.print(f"[blue bold]Group: {grp.name}[/]")
+            for _, cmd in grp.cmds.items():
+                rich.print(f"[green bold]{cmd.name}[/]: {cmd.cmd}")
+        return
+
+    if groups:
+        master_groups = [grp for grp in master_groups if grp.name in [g.strip() for g in groups.split(",")]]
+
+    if cmds:
+        for grp in master_groups:
+            grp.cmds = OrderedDict(
+                {
+                    cmd_name: cmd
+                    for cmd_name, cmd in grp.cmds.items()
+                    if cmd_name in [c.strip() for c in cmds.split(",")]
+                }
+            )
+        master_groups = [grp for grp in master_groups if grp.cmds]
+
+    #  q = mp.Manager().Queue()
+    cb = CLICommandCB()
+    for grp in master_groups:
+        exit_code = exit_code or grp.run(ProcessingStrategy.AS_COMPLETED, cb)
+
+    # Summarise the results
+    for grp in master_groups:
+        rich.print(f"[blue bold]Group: {grp.name}[/]")
+        for _, cmd in grp.cmds.items():
+            if cmd.status == CommandStatus.SUCCESS:
+                rich.print(f"[green bold]Command {cmd.name} succeeded ({cmd.num_non_empty_lines})[/]")
+            else:
+                rich.print(f"[red bold]Command {cmd.name} failed ({cmd.num_non_empty_lines})[/]")
+
+    raise typer.Exit(exit_code)
+
+
+try:
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+    from pathlib import Path
+    from typing import Optional
+
+    import psutil
+    import typer
+
+    typer.echo("Web commands loaded")
+
+    PID_FILE = ".par-run.uvicorn.pid"
+
+    @cli_app.command()
+    def web(
+        command: WebCommand = typer.Argument(..., help="command to control/interract with the web server"),
+        port: int = typer.Option(8001, help="Port to run the web server"),
+    ):
+        """Run the web server"""
+        if command == WebCommand.START:
+            start_web_server(port)
+        elif command == WebCommand.STOP:
+            stop_web_server()
+        elif command == WebCommand.RESTART:
+            stop_web_server()
+            start_web_server(port)
+        elif command == WebCommand.STATUS:
+            get_web_server_status()
+        else:
+            typer.echo(f"Not a valid command '{command}'", err=True)
+            raise typer.Abort()
+
+except ImportError:  # pragma: no cover
+    pass  # pragma: no cover
