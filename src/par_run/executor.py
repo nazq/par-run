@@ -11,8 +11,8 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
 from queue import Queue
 from typing import List, Optional, Protocol, TypeVar, Union
+from pydantic import BaseModel, Field, ConfigDict
 
-from pydantic import BaseModel, ConfigDict, Field
 
 # Type alias for a generic future.
 GenFuture = Union[Future, asyncio.Future]
@@ -23,8 +23,8 @@ ContextT = TypeVar("ContextT")
 class ProcessingStrategy(enum.Enum):
     """Enum for processing strategies."""
 
-    AS_COMPLETED = "As Completed"
-    ON_RECV = "On Receive"
+    ON_COMP = "comp"
+    ON_RECV = "recv"
 
 
 class CommandStatus(enum.Enum):
@@ -94,11 +94,30 @@ class CommandAsyncCB(Protocol):
     async def on_term(self, cmd: Command, exit_code: int) -> None: ...
 
 
+class QRetriever:
+    def __init__(self, q: Queue, timeout: int, retries: int):
+        self.q = q
+        self.timeout = timeout
+        self.retries = retries
+
+    def get(self):
+        retry_count = 0
+        while True:
+            try:
+                return self.q.get(block=True, timeout=self.timeout)
+            except queue.Empty:
+                if retry_count < self.retries:
+                    retry_count += 1
+                    continue
+                else:
+                    raise TimeoutError("Timeout waiting for command output")
+
+
 class CommandGroup(BaseModel):
     """Holder for a group of commands."""
 
     name: str
-    cmds: OrderedDict[str, Command]
+    cmds: OrderedDict[str, Command] = Field(default_factory=OrderedDict)
 
     async def run_async(
         self,
@@ -144,18 +163,16 @@ class CommandGroup(BaseModel):
             for _, cmd in self.cmds.items():
                 callbacks.on_start(cmd)
 
+        timeout = 10
+        retries = 3
+        q_ret = QRetriever(q, timeout, retries)
         while True:
-            try:
-                q_result = q.get(block=True, timeout=10)
-            except queue.Empty:
-                continue
+            q_result = q_ret.get()
 
             # Can only get here with a valid message from the Q
             cmd_name = q_result[0]
-            # print(q_result, type(q_result[0]), type(q_result[1]))
             exit_code: Optional[int] = q_result[1] if isinstance(q_result[1], int) else None
             output_line: Optional[str] = q_result[1] if isinstance(q_result[1], str) else None
-            # print(output_line, exit_code)
             if exit_code is None and output_line is None:
                 raise ValueError("Invalid Q message")  # pragma: no cover
 
@@ -172,7 +189,7 @@ class CommandGroup(BaseModel):
                 else:
                     raise ValueError("Invalid Q message")  # pragma: no cover
 
-            if strategy == ProcessingStrategy.AS_COMPLETED:
+            if strategy == ProcessingStrategy.ON_COMP:
                 if output_line is not None:
                     cmd.incr_line_count(output_line)
                     cmd.append_unflushed(output_line)
@@ -204,12 +221,12 @@ class CommandGroup(BaseModel):
             for _, cmd in self.cmds.items():
                 await callbacks.on_start(cmd)
 
+        timeout = 10
+        retries = 3
+        q_ret = QRetriever(q, timeout, retries)
         while True:
             await asyncio.sleep(0)
-            try:
-                q_result = q.get(block=True, timeout=10)
-            except queue.Empty:
-                continue
+            q_result = q_ret.get()
 
             # Can only get here with a valid message from the Q
             cmd_name = q_result[0]
@@ -233,7 +250,7 @@ class CommandGroup(BaseModel):
                 else:
                     raise ValueError("Invalid Q message")  # pragma: no cover
 
-            if strategy == ProcessingStrategy.AS_COMPLETED:
+            if strategy == ProcessingStrategy.ON_COMP:
                 if output_line is not None:
                     cmd.incr_line_count(output_line)
                     cmd.append_unflushed(output_line)

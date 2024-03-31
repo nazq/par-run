@@ -5,7 +5,7 @@ import pytest
 from typer.testing import CliRunner
 
 from par_run.cli import (
-    CLICommandCB,
+    CLICommandCBOnComp,
     clean_up,
     cli_app,
     get_process_port,
@@ -44,7 +44,7 @@ def test_run(mocker, mock_command_group):
 
 def test_CLICommandCB_on_start(mocker):
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
-    cb = CLICommandCB()
+    cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
     cb.on_start(command)
     mock_rich_print.assert_called_once()
@@ -52,7 +52,7 @@ def test_CLICommandCB_on_start(mocker):
 
 def test_CLICommandCB_on_recv(mocker):
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
-    cb = CLICommandCB()
+    cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
     cb.on_recv(command, "Hello, World!")
     mock_rich_print.assert_called_once_with("Hello, World!")
@@ -61,7 +61,7 @@ def test_CLICommandCB_on_recv(mocker):
 @pytest.mark.parametrize("status", [CommandStatus.SUCCESS, CommandStatus.FAILURE])
 def test_CLICommandCB_on_term(mocker, status):
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
-    cb = CLICommandCB()
+    cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
     command.status = status
     cb.on_term(command, 0)

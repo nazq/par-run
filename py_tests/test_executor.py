@@ -146,7 +146,7 @@ def test_command_group():
     commands[command1.name] = command1
     commands[command2.name] = command2
     group = CommandGroup(name="test_group", cmds=commands)
-    group_exit = group.run(ProcessingStrategy.AS_COMPLETED, TestCommandCB())
+    group_exit = group.run(ProcessingStrategy.ON_COMP, TestCommandCB())
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
@@ -180,7 +180,7 @@ def test_command_group_part_fail():
     commands[command1.name] = command1
     commands[command2.name] = command2
     group = CommandGroup(name="test_group", cmds=commands)
-    group_exit = group.run(ProcessingStrategy.AS_COMPLETED, TestCommandCB())
+    group_exit = group.run(ProcessingStrategy.ON_COMP, TestCommandCB())
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
@@ -215,7 +215,7 @@ async def test_command_group_async():
     commands[command1.name] = command1
     commands[command2.name] = command2
     group = CommandGroup(name="test_group", cmds=commands)
-    await group.run_async(ProcessingStrategy.AS_COMPLETED, TestCommandCBAsync())
+    await group.run_async(ProcessingStrategy.ON_COMP, TestCommandCBAsync())
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
@@ -248,7 +248,7 @@ async def test_command_group_async_part_fail():
     commands[command1.name] = command1
     commands[command2.name] = command2
     group = CommandGroup(name="test_group", cmds=commands)
-    group_exit = await group.run_async(ProcessingStrategy.AS_COMPLETED, TestCommandCBAsync())
+    group_exit = await group.run_async(ProcessingStrategy.ON_COMP, TestCommandCBAsync())
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())

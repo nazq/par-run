@@ -138,7 +138,7 @@ class WebCommand(enum.Enum):
         return self.value
 
 
-class CLICommandCB:
+class CLICommandCBOnComp:
     def on_start(self, cmd: Command):
         rich.print(f"[blue bold]Completed command {cmd.name}[/]")
 
@@ -153,8 +153,24 @@ class CLICommandCB:
             rich.print(f"[red bold]Command {cmd.name} failed, {exit_code=:}[/]")
 
 
+class CLICommandCBOnRecv:
+    def on_start(self, cmd: Command):
+        rich.print(f"[blue bold]{cmd.name}: Started[/]")
+
+    def on_recv(self, cmd: Command, output: str):
+        rich.print(f"{cmd.name}: {output}")
+
+    def on_term(self, cmd: Command, exit_code: int):
+        """Callback function for when a command receives output"""
+        if cmd.status == CommandStatus.SUCCESS:
+            rich.print(f"[green bold]{cmd.name}: Finished[/]")
+        elif cmd.status == CommandStatus.FAILURE:
+            rich.print(f"[red bold]{cmd.name}: Failed, {exit_code=:}[/]")
+
+
 @cli_app.command()
 def run(
+    style: ProcessingStrategy = typer.Option(help="Processing strategy", default="comp"),
     show: bool = typer.Option(help="Show available groups and commands", default=False),
     file: Path = typer.Option(help="The commands.ini file to use", default=Path("commands.ini")),
     groups: Optional[str] = typer.Option(None, help="Run a specific group of commands, comma spearated"),
@@ -186,10 +202,17 @@ def run(
             )
         master_groups = [grp for grp in master_groups if grp.cmds]
 
-    #  q = mp.Manager().Queue()
-    cb = CLICommandCB()
+    if not master_groups:
+        rich.print("[blue]No groups or commands found.[/]")
+        raise typer.Exit(0)
+
     for grp in master_groups:
-        exit_code = exit_code or grp.run(ProcessingStrategy.AS_COMPLETED, cb)
+        if style == ProcessingStrategy.ON_COMP:
+            exit_code = exit_code or grp.run(style, CLICommandCBOnComp())
+        elif style == ProcessingStrategy.ON_RECV:
+            exit_code = exit_code or grp.run(style, CLICommandCBOnRecv())
+        else:
+            raise typer.BadParameter("Invalid processing strategy")
 
     # Summarise the results
     for grp in master_groups:
@@ -215,7 +238,7 @@ try:
     import psutil
     import typer
 
-    typer.echo("Web commands loaded")
+    rich.print("[blue]Web commands loaded[/]")
 
     PID_FILE = ".par-run.uvicorn.pid"
 

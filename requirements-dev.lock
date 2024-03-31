@@ -3,8 +3,8 @@
 #
 # last locked with the following flags:
 #   pre: false
-#   features: ["web"]
-#   all-features: false
+#   features: []
+#   all-features: true
 #   with-sources: false
 
 -e file:.
@@ -14,14 +14,14 @@ anyio==4.3.0
     # via httpx
     # via starlette
     # via watchfiles
-bump-my-version==0.19.3
+bump-my-version==0.20.0
 certifi==2024.2.2
     # via httpcore
     # via httpx
 click==8.1.7
     # via bump-my-version
     # via rich-click
-    # via typer
+    # via typer-slim
     # via uvicorn
 coverage==7.4.4
     # via pytest-cov
@@ -97,22 +97,31 @@ rich==13.7.1
     # via bump-my-version
     # via par-run
     # via rich-click
+    # via typer-slim
 rich-click==1.7.4
     # via bump-my-version
 ruff==0.3.4
+shellingham==1.5.4
+    # via typer-slim
 sniffio==1.3.1
     # via anyio
     # via httpx
 starlette==0.36.3
     # via fastapi
+    # via par-run
 tomli==2.0.1
     # via coverage
     # via mypy
     # via pytest
 tomlkit==0.12.4
     # via bump-my-version
-typer==0.9.0
+typer==0.12.0
     # via par-run
+typer-cli==0.12.0
+    # via typer
+typer-slim==0.12.0
+    # via typer
+    # via typer-cli
 types-psutil==5.9.5.20240316
 types-toml==0.10.8.20240310
 typing-extensions==4.10.0
@@ -123,7 +132,7 @@ typing-extensions==4.10.0
     # via pydantic-core
     # via rich-click
     # via starlette
-    # via typer
+    # via typer-slim
     # via uvicorn
 uvicorn==0.29.0
     # via par-run

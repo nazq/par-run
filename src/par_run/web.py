@@ -1,7 +1,6 @@
 """Web UI Module"""
 
 from pathlib import Path
-
 import rich
 from fastapi import Body, FastAPI, Request, WebSocket
 from fastapi.staticfiles import StaticFiles
