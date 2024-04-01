@@ -1,10 +1,23 @@
 [project]
 name = "par-run"
-version = "0.1.2"
+version = "0.1.3"
 description = "Parallel command runner"
 license = "MIT"
 authors = [
     { name = "Naz Quadri", email = "naz.quadri@gmail.com" }
+]
+classifiers = [
+    'Development Status :: 4 - Beta',
+    'Intended Audience :: Developers',
+    'License :: OSI Approved :: MIT License',
+    'Natural Language :: English',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3.7',
+    'Programming Language :: Python :: 3.8',
+    'Programming Language :: Python :: 3.9',
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
 ]
 dependencies = [
     "rich>=13.0.0",
@@ -13,6 +26,13 @@ dependencies = [
 ]
 readme = "README.md"
 requires-python = ">= 3.9"
+
+[project.urls]
+Homepage = "https://github.com/nazq/par-run"
+Documentation = "https://github.com/nazq/par-run"
+Repository = "https://github.com/nazq/par-run"
+Issues = "https://github.com/nazq/par-run/issues"
+Changelog = "https://github.com/nazq/par-run"
 
 [project.optional-dependencies]
 web = [
@@ -59,7 +79,7 @@ packages = [
 ]
 
 [tool.bumpversion]
-current_version = "0.1.2"
+current_version = "0.1.3"
 commit = true
 tag = true
 tag_name = "{new_version}"
