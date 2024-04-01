@@ -1,6 +1,7 @@
 # par-run
 [![License: MIT](https://img.shields.io/badge/license-MIT-C06524)](https://github.com/nazq/par-run/blob/main/LICENSE)
 [![PyPI version](https://badge.fury.io/py/par-run.svg)](https://badge.fury.io/py/par-run)
+[![Python Versions](https://img.shields.io/pypi/pyversions/par-run)](https://pypi.org/project/par-run/)
 
 Ever needed to run groups of long-ish running commands in parallel groups? Then this is for you. par-run gives both a CLI and web interface to running groups of commands in parallel.  
 
