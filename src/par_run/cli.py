@@ -183,7 +183,7 @@ def format_elapsed_time(seconds: float) -> str:
     seconds = seconds % 60  # Keeping the fractional part of seconds
 
     # Return formatted string with seconds rounded to 2 d.p.
-    return f"{hours:02}:{minutes:02}:{seconds:06.2f}"
+    return f"{hours:02}:{minutes:02}:{seconds:06.3f}"
 
 
 @cli_app.command()
@@ -197,7 +197,8 @@ def run(
     """Run commands in parallel"""
     # Overall exit code, need to track all command exit codes to update this
     exit_code = 0
-
+    st_all = time.perf_counter()
+    # console = rich.console.Console()
     master_groups = read_commands_toml(file)
     if show:
         for grp in master_groups:
@@ -233,17 +234,33 @@ def run(
             raise typer.BadParameter("Invalid processing strategy")
 
     # Summarise the results
+    console = rich.console.Console()
     for grp in master_groups:
-        rich.print(f"[blue bold]Group: {grp.name}[/]")
+        console.print(f"[blue bold]Group: {grp.name}[/]")
         for _, cmd in grp.cmds.items():
-            if cmd.status == CommandStatus.SUCCESS:
-                elap_str = ""
-                if cmd.elapsed:
-                    elap_str = f", {format_elapsed_time(cmd.elapsed)}"
-                rich.print(f"[green bold]Command {cmd.name} succeeded ({cmd.num_non_empty_lines}{elap_str})[/]")
+            elap_str = ""
+            if cmd.elapsed:
+                elap_str = f", {format_elapsed_time(cmd.elapsed)}"
             else:
-                rich.print(f"[red bold]Command {cmd.name} failed ({cmd.num_non_empty_lines}{elap_str})[/]")
+                elap_str = ", XX:XX:XX.xxx"
 
+            if cmd.status == CommandStatus.SUCCESS:
+                left_seg = f"[green bold]Command {cmd.name} succeeded "
+            else:
+                left_seg = f"[red bold]Command {cmd.name} failed "
+
+            right_seg = f"({cmd.num_non_empty_lines}{elap_str})[/]"
+
+            # Adjust total line width dynamically based on max width and other content
+            pad_length = (
+                100 - len(left_seg) - len(right_seg) - 10
+                if "succeeded" in left_seg
+                else 100 - len(left_seg) - len(right_seg) - 12
+            )
+
+            rich.print(f"{left_seg}{' ' * pad_length}{right_seg}")
+    end_style = "[green bold]" if exit_code == 0 else "[red bold]"
+    rich.print(f"\n{end_style}Total elapsed time: {format_elapsed_time(time.perf_counter() - st_all)}[/]")
     raise typer.Exit(exit_code)
 
 
