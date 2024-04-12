@@ -12,7 +12,7 @@ pip install par-run
 par-run run
 ```
 
-This expects a file call `commands.ini` or you can override with the `--file` option
+This expects a file call `toml` file, by default the `pyproject.toml` or you can override with the `--file` option
 
 ```toml
 
