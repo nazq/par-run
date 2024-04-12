@@ -36,7 +36,7 @@ def mock_command_group_part_fail():
 
 
 def test_run(mocker, mock_command_group):
-    mocker.patch("par_run.cli.read_commands_ini", return_value=[mock_command_group])
+    mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--show"])
     assert result.exit_code == 0
@@ -166,7 +166,7 @@ def test_get_web_server_status(mocker, tmp_path):
 
 
 def test_run_with_specific_groups(mocker, mock_command_group):
-    read_mock = mocker.patch("par_run.cli.read_commands_ini", return_value=[mock_command_group])
+    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--groups", "group1"])
     assert result.exit_code == 0
@@ -174,7 +174,7 @@ def test_run_with_specific_groups(mocker, mock_command_group):
 
 
 def test_run_with_fails(mocker, mock_command_group_part_fail):
-    read_mock = mocker.patch("par_run.cli.read_commands_ini", return_value=[mock_command_group_part_fail])
+    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group_part_fail])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run"])
     assert result.exit_code != 0
@@ -182,7 +182,7 @@ def test_run_with_fails(mocker, mock_command_group_part_fail):
 
 
 def test_run_with_specific_cmds(mocker, mock_command_group):
-    mocker.patch("par_run.cli.read_commands_ini", return_value=[mock_command_group])
+    mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--cmds", "cmd1"])
     assert result.exit_code == 0
@@ -190,7 +190,7 @@ def test_run_with_specific_cmds(mocker, mock_command_group):
 
 
 def test_run_with_nonexistent_group(mocker, mock_command_group):
-    mocker.patch("par_run.cli.read_commands_ini", return_value=[mock_command_group])
+    mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--groups", "nonexistent"])
     assert result.exit_code == 0
@@ -198,7 +198,7 @@ def test_run_with_nonexistent_group(mocker, mock_command_group):
 
 
 def test_run_with_nonexistent_cmd(mocker, mock_command_group):
-    mocker.patch("par_run.cli.read_commands_ini", return_value=[mock_command_group])
+    mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--cmds", "nonexistent"])
     assert result.exit_code == 0

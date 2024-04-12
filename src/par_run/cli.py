@@ -8,7 +8,7 @@ import enum
 import rich
 import typer
 
-from .executor import Command, CommandStatus, ProcessingStrategy, read_commands_ini
+from .executor import Command, CommandStatus, ProcessingStrategy, read_commands_toml
 
 PID_FILE = ".par-run.uvicorn.pid"
 
@@ -168,11 +168,29 @@ class CLICommandCBOnRecv:
             rich.print(f"[red bold]{cmd.name}: Failed, {exit_code=:}[/]")
 
 
+def format_elapsed_time(seconds: float) -> str:
+    """
+    Converts a number of seconds into a human-readable time format of HH:MM:SS.xxx
+
+    Args:
+    seconds (float): The number of seconds elapsed.
+
+    Returns:
+    str: The formatted time string.
+    """
+    hours = int(seconds) // 3600
+    minutes = (int(seconds) % 3600) // 60
+    seconds = seconds % 60  # Keeping the fractional part of seconds
+
+    # Return formatted string with seconds rounded to 2 d.p.
+    return f"{hours:02}:{minutes:02}:{seconds:06.2f}"
+
+
 @cli_app.command()
 def run(
     style: ProcessingStrategy = typer.Option(help="Processing strategy", default="comp"),
     show: bool = typer.Option(help="Show available groups and commands", default=False),
-    file: Path = typer.Option(help="The commands.ini file to use", default=Path("commands.ini")),
+    file: Path = typer.Option(help="The commands.ini file to use", default=Path("pyproject.toml")),
     groups: Optional[str] = typer.Option(None, help="Run a specific group of commands, comma spearated"),
     cmds: Optional[str] = typer.Option(None, help="Run a specific commands, comma spearated"),
 ):
@@ -180,7 +198,7 @@ def run(
     # Overall exit code, need to track all command exit codes to update this
     exit_code = 0
 
-    master_groups = read_commands_ini(file)
+    master_groups = read_commands_toml(file)
     if show:
         for grp in master_groups:
             rich.print(f"[blue bold]Group: {grp.name}[/]")
@@ -219,9 +237,12 @@ def run(
         rich.print(f"[blue bold]Group: {grp.name}[/]")
         for _, cmd in grp.cmds.items():
             if cmd.status == CommandStatus.SUCCESS:
-                rich.print(f"[green bold]Command {cmd.name} succeeded ({cmd.num_non_empty_lines})[/]")
+                elap_str = ""
+                if cmd.elapsed:
+                    elap_str = f", {format_elapsed_time(cmd.elapsed)}"
+                rich.print(f"[green bold]Command {cmd.name} succeeded ({cmd.num_non_empty_lines}{elap_str})[/]")
             else:
-                rich.print(f"[red bold]Command {cmd.name} failed ({cmd.num_non_empty_lines})[/]")
+                rich.print(f"[red bold]Command {cmd.name} failed ({cmd.num_non_empty_lines}{elap_str})[/]")
 
     raise typer.Exit(exit_code)
 
@@ -263,3 +284,6 @@ try:
 
 except ImportError:  # pragma: no cover
     pass  # pragma: no cover
+
+if __name__ == "__main__":
+    cli_app()

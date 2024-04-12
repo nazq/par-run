@@ -45,8 +45,9 @@ def test_command_set_ret_code_success():
 
     q = mp.Manager().Queue()
     pool = ProcessPoolExecutor()
-    fut = pool.submit(run_command, command.name, command.cmd, q)
+    fut = pool.submit(run_command, command.name, command.cmd, {}, q)
     command.fut = fut
+    command.set_running()
     _ = fut.result()
 
     msg = q.get()
@@ -67,7 +68,8 @@ def test_command_set_ret_code_failure():
     command = Command(name="test", cmd="exit 1")
     q = mp.Manager().Queue()
     pool = ProcessPoolExecutor()
-    fut = pool.submit(run_command, command.name, command.cmd, q)
+    fut = pool.submit(run_command, command.name, command.cmd, {}, q)
+    command.set_running()
     command.fut = fut
     _ = fut.result()
     msg = q.get()
@@ -277,7 +279,7 @@ async def test_command_group_async_part_fail():
 
 def test_run_command():
     q = mp.Manager().Queue()
-    run_command("Test", "echo 'Hello, World!'", q)
+    run_command("Test", "echo 'Hello, World!'", {}, q)
 
     msg = q.get()
     assert isinstance(msg, tuple)

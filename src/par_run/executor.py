@@ -4,15 +4,17 @@ import asyncio
 import configparser
 import enum
 import multiprocessing as mp
+import os
 import queue
 import subprocess
 from collections import OrderedDict
 from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
 from queue import Queue
-from typing import List, Optional, Protocol, TypeVar, Union
+import time
+from typing import List, Optional, Protocol, TypeVar, Union, Any
 from pydantic import BaseModel, Field, ConfigDict
-
+import tomlkit
 
 # Type alias for a generic future.
 GenFuture = Union[Future, asyncio.Future]
@@ -47,11 +49,15 @@ class Command(BaseModel):
 
     name: str
     cmd: str
+    passenv: Optional[list[str]] = Field(default=None)
+    setenv: Optional[dict[str, str]] = Field(default=None)
     status: CommandStatus = CommandStatus.NOT_STARTED
     unflushed: List[str] = Field(default=[], exclude=True)
     num_non_empty_lines: int = Field(default=0, exclude=True)
     ret_code: Optional[int] = Field(default=None, exclude=True)
     fut: Optional[GenFuture] = Field(default=None, exclude=True)
+    start_time: Optional[float] = Field(default=None, exclude=True)
+    elapsed: Optional[float] = Field(default=None, exclude=True)
 
     def incr_line_count(self, line: str) -> None:
         """Increment the non-empty line count."""
@@ -68,6 +74,8 @@ class Command(BaseModel):
 
     def set_ret_code(self, ret_code: int):
         """Set the return code and status of the command."""
+        if self.start_time:
+            self.elapsed = time.perf_counter() - self.start_time
         self.ret_code = ret_code
         if self.fut:
             self.fut.cancel()
@@ -79,6 +87,7 @@ class Command(BaseModel):
 
     def set_running(self):
         """Set the command status to running."""
+        self.start_time = time.perf_counter()
         self.status = CommandStatus.RUNNING
 
 
@@ -112,12 +121,18 @@ class QRetriever:
                 else:
                     raise TimeoutError("Timeout waiting for command output")
 
+    def __str__(self) -> str:
+        return f"QRetriever(timeout={self.timeout}, retries={self.retries})"
+
 
 class CommandGroup(BaseModel):
     """Holder for a group of commands."""
 
     name: str
+    desc: Optional[str] = None
     cmds: OrderedDict[str, Command] = Field(default_factory=OrderedDict)
+    timeout: int = Field(default=30)
+    retries: int = Field(default=3)
 
     async def run_async(
         self,
@@ -127,7 +142,7 @@ class CommandGroup(BaseModel):
         q = mp.Manager().Queue()
         pool = ProcessPoolExecutor()
         futs = [
-            asyncio.get_event_loop().run_in_executor(pool, run_command, cmd.name, cmd.cmd, q)
+            asyncio.get_event_loop().run_in_executor(pool, run_command, cmd.name, cmd.cmd, cmd.setenv, q)
             for _, cmd in self.cmds.items()
         ]
 
@@ -137,18 +152,13 @@ class CommandGroup(BaseModel):
 
         return await self._process_q_async(q, strategy, callbacks)
 
-    def run(
-        self,
-        strategy: ProcessingStrategy,
-        callbacks: CommandCB,
-    ):
+    def run(self, strategy: ProcessingStrategy, callbacks: CommandCB):
         q = mp.Manager().Queue()
         pool = ProcessPoolExecutor()
-        futs = [pool.submit(run_command, cmd.name, cmd.cmd, q) for _, cmd in self.cmds.items()]
+        futs = [pool.submit(run_command, cmd.name, cmd.cmd, cmd.setenv, q) for _, cmd in self.cmds.items()]
         for (_, cmd), fut in zip(self.cmds.items(), futs):
             cmd.fut = fut
             cmd.set_running()
-
         return self._process_q(q, strategy, callbacks)
 
     def _process_q(
@@ -163,9 +173,7 @@ class CommandGroup(BaseModel):
             for _, cmd in self.cmds.items():
                 callbacks.on_start(cmd)
 
-        timeout = 10
-        retries = 3
-        q_ret = QRetriever(q, timeout, retries)
+        q_ret = QRetriever(q, self.timeout, self.retries)
         while True:
             q_result = q_ret.get()
 
@@ -221,19 +229,15 @@ class CommandGroup(BaseModel):
             for _, cmd in self.cmds.items():
                 await callbacks.on_start(cmd)
 
-        timeout = 10
-        retries = 3
-        q_ret = QRetriever(q, timeout, retries)
+        q_ret = QRetriever(q, self.timeout, self.retries)
         while True:
             await asyncio.sleep(0)
             q_result = q_ret.get()
 
             # Can only get here with a valid message from the Q
             cmd_name = q_result[0]
-            # print(q_result, type(q_result[0]), type(q_result[1]))
             exit_code: Optional[int] = q_result[1] if isinstance(q_result[1], int) else None
             output_line: Optional[str] = q_result[1] if isinstance(q_result[1], str) else None
-            # print(output_line, exit_code)
             if exit_code is None and output_line is None:
                 raise ValueError("Invalid Q message")  # pragma: no cover
 
@@ -316,20 +320,95 @@ def write_commands_ini(filename: Union[str, Path], command_groups: list[CommandG
         config.write(configfile)
 
 
-def run_command(name: str, command: str, q: Queue) -> None:
+def _validate_mandatory_keys(data: tomlkit.items.Table, keys: list[str], context: str) -> tuple[Any, ...]:
+    """Validate that the mandatory keys are present in the data.
+
+    Args:
+        data (tomlkit.items.Table): The data to validate.
+        keys (list[str]): The mandatory keys.
+    """
+    vals = []
+    for key in keys:
+        val = data.get(key, None)
+        if not val:
+            raise ValueError(f"{key} is mandatory, not found in {context}")
+        vals.append(val)
+    return tuple(vals)
+
+
+def _get_optional_keys(data: tomlkit.items.Table, keys: list[str], default=None) -> tuple[Optional[Any], ...]:
+    """Get Optional keys or default.
+
+    Args:
+        data (tomlkit.items.Table): The data to use as source
+        keys (list[str]): The optional keys.
+    """
+    return tuple(data.get(key, default) for key in keys)
+
+
+def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
+    """Read a commands.toml file and return a list of CommandGroup objects.
+
+    Args:
+        filename (Union[str, Path]): The filename of the commands.toml file.
+
+    Returns:
+        list[CommandGroup]: A list of CommandGroup objects.
+    """
+
+    with open(filename, "r", encoding="utf-8") as toml_file:
+        toml_data = tomlkit.parse(toml_file.read())
+
+    cmd_groups_data = toml_data.get("tool", {}).get("par-run", {})
+    if not cmd_groups_data:
+        raise ValueError("No par-run data found in toml file")
+    _ = cmd_groups_data.get("description", None)
+
+    command_groups = []
+    for group_data in cmd_groups_data.get("groups", []):
+        (group_name,) = _validate_mandatory_keys(group_data, ["name"], "top level par-run group")
+        group_desc, group_timeout, group_retries = _get_optional_keys(
+            group_data, ["desc", "timeout", "retries"], default=None
+        )
+
+        if not group_timeout:
+            group_timeout = 30
+        if not group_retries:
+            group_retries = 3
+
+        commands = OrderedDict()
+        for cmd_data in group_data.get("commands", []):
+            name, exec = _validate_mandatory_keys(cmd_data, ["name", "exec"], f"command group {group_name}")
+            setenv, passenv = _get_optional_keys(cmd_data, ["setenv", "passenv"], default=None)
+
+            commands[name] = Command(name=name, cmd=exec, setenv=setenv, passenv=passenv)
+        command_group = CommandGroup(
+            name=group_name, desc=group_desc, cmds=commands, timeout=group_timeout, retries=group_retries
+        )
+        command_groups.append(command_group)
+
+    return command_groups
+
+
+def run_command(name: str, command: str, setenv: Optional[dict[str, str]], q: Queue) -> None:
     """Run a command and put the output into a queue. The output is a tuple of the command
     name and the output line. The final output is a tuple of the command name and a dictionary
     with the return code.
 
     Args:
-        name (str): Name of the command.
-        command (str): Command to run.
+        name (Command): Command to run.
         q (Queue): Queue to put the output into.
     """
 
+    new_env = None
+    if setenv:
+        new_env = os.environ.copy()
+        new_env.update(setenv)
+
     with subprocess.Popen(
-        f"{command}",
+        command,
         shell=True,
+        env=new_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

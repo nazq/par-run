@@ -5,19 +5,32 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Module",
+            "name": "Python Debugger: CLI",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "par_run.cli",
+            "args": [
+                "run",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Python Debugger: Web",
             "type": "debugpy",
             "request": "launch",
             "module": "uvicorn",
             "args": [
                 "par_run.web:ws_app",
-                "--host", "127.0.0.1",
-                "--port", "8000",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8000",
                 "--reload"
             ],
             "console": "integratedTerminal",
             "justMyCode": false
         }
-        }
-    ]
+    }
+]
 }
