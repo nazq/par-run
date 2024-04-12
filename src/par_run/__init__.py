@@ -1,3 +1,3 @@
 """Main module for the py_runner package."""
 
-__version__ = "0.1.4"
+__version__ = "0.2.0"
