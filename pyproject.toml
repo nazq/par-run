@@ -159,11 +159,11 @@ timeout = 5
 retries = 3
 
   [[tool.par-run.groups.commands]]
-  name = "my_var"
-  exec = "echo \"MY_VAR=$MY_VAR\""
+  name = "full_env"
+  exec = "env"
   setenv = {MY_VAR = "production", ENABLE_LOGS = "true"}
 
   [[tool.par-run.groups.commands]]
-  name = "full_env"
-  exec = "env"
+  name = "my_var"
+  exec = "echo \"MY_VAR=$MY_VAR\", \"ENABLE_LOGS=$ENABLE_LOGS\""
   setenv = {MY_VAR = "production", ENABLE_LOGS = "true"}

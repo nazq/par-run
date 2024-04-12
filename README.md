@@ -14,15 +14,66 @@ par-run run
 
 This expects a file call `commands.ini` or you can override with the `--file` option
 
-```ini
-[group.formatting]
-ruff_fmt = ruff format src py_tests
-ruff_fix = ruff check --fix src py_tests
+```toml
 
-[group.quality]
-ruff_lint = ruff check src py_tests
-mypy = mypy src
-pytest = pytest py_tests
+[tool.par-run]
+desc = "par-run from pyproject.toml"
+
+[[tool.par-run.groups]]
+name = "Formatting"
+desc = "Code formatting commands."
+timeout = 5
+retries = 3 
+
+  [[tool.par-run.groups.commands]]
+  name = "ruff_fmt"
+  exec = "ruff format src py_tests"
+  # Define an empty extras using standard table notation, or simply omit it if it's always empty
+
+  [[tool.par-run.groups.commands]]
+  name = "ruff_fix"
+  exec = "ruff check --fix src py_tests"
+  # Define an empty extras using standard table notation, or simply omit it if it's always empty
+
+
+[[tool.par-run.groups]]
+name = "Quality"
+desc = "Code Quality Tools. No code mutation"
+timeout = 5
+retries = 3
+
+  [[tool.par-run.groups.commands]]
+  name = "ruff_lint"
+  exec = "ruff check src py_tests"
+  # extras omitted as it's empty
+
+  [[tool.par-run.groups.commands]]
+  name = "mypy"
+  exec = "mypy src"
+  setenv = {NODE_ENV = "production", ENABLE_LOGS = "true"}
+
+  [[tool.par-run.groups.commands]]
+  name = "pytest"
+  exec = "pytest py_tests"
+  setenv = {NODE_ENV = "production", ENABLE_LOGS = "true"}
+
+
+[[tool.par-run.groups]]
+name = "ENV"
+desc = "Code Quality Tools. No code mutation"
+timeout = 5
+retries = 3
+
+  [[tool.par-run.groups.commands]]
+  name = "full_env"
+  exec = "env"
+  setenv = {MY_VAR = "production", ENABLE_LOGS = "true"}
+
+  [[tool.par-run.groups.commands]]
+  name = "my_var"
+  exec = "echo \"MY_VAR=$MY_VAR\", \"ENABLE_LOGS=$ENABLE_LOGS\""
+  setenv = {MY_VAR = "production", ENABLE_LOGS = "true"}
+
 ```
 
 The tool will execute each group in parallel collating the the output until each command has completed before writing to the console. If you do not want to wait then it's possible to get the output as it's produced with the `--style recv` param.
