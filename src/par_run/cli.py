@@ -183,6 +183,9 @@ def format_elapsed_time(seconds: float) -> str:
 def show_commands(groups: list[CommandGroup]):
     for grp in groups:
         rich.print(f"[blue bold]Group: {grp.name}[/]")
+        rich.print(
+            f"Params: cont_on_fail={grp.cont_on_fail}, serial={grp.serial}, timeout={grp.timeout}, retries={grp.retries}"
+        )
         for cmd in grp.cmds.values():
             rich.print(f"[green bold]{cmd.name}[/]: {cmd.cmd}")
 

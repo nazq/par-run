@@ -135,11 +135,12 @@ class CommandGroup(BaseModel):
     timeout: int = Field(default=30)
     retries: int = Field(default=3)
     cont_on_fail: bool = Field(default=False)
+    serial: bool = Field(default=False)
     status: CommandStatus = CommandStatus.NOT_STARTED
 
-    def update_status(self):
+    def update_status(self, cmds: OrderedDict[str, Command]):
         """Update the status of the command group."""
-        if all(cmd.status == CommandStatus.SUCCESS for _, cmd in self.cmds.items()):
+        if all(cmd.status == CommandStatus.SUCCESS for cmd in cmds.values()):
             self.status = CommandStatus.SUCCESS
         else:
             self.status = CommandStatus.FAILURE
@@ -165,14 +166,24 @@ class CommandGroup(BaseModel):
     def run(self, strategy: ProcessingStrategy, callbacks: CommandCB):
         q = mp.Manager().Queue()
         pool = ProcessPoolExecutor()
-        futs = [pool.submit(run_command, cmd.name, cmd.cmd, cmd.setenv, q) for _, cmd in self.cmds.items()]
-        for (_, cmd), fut in zip(self.cmds.items(), futs):
-            cmd.fut = fut
-            cmd.set_running()
-        return self._process_q(q, strategy, callbacks)
+        cmd_series = [OrderedDict([(k, v)]) for k, v in self.cmds.items()] if self.serial else [self.cmds]
+        group_exit_code = 0
+
+        for cmd_entries in cmd_series:
+            futs = [pool.submit(run_command, cmd.name, cmd.cmd, cmd.setenv, q) for cmd in cmd_entries.values()]
+            for cmd, fut in zip(cmd_entries.values(), futs):
+                cmd.fut = fut
+                cmd.set_running()
+            exit_code = self._process_q(cmd_entries, q, strategy, callbacks)
+            if exit_code != 0:
+                group_exit_code = 1
+                if not self.cont_on_fail:
+                    break
+        return group_exit_code
 
     def _process_q(  # noqa: PLR0912
         self,
+        cmds: OrderedDict[str, Command],
         q: Queue,
         strategy: ProcessingStrategy,
         callbacks: CommandCB,
@@ -180,7 +191,7 @@ class CommandGroup(BaseModel):
         grp_exit_code = 0
 
         if strategy == ProcessingStrategy.ON_RECV:
-            for cmd in self.cmds.values():
+            for cmd in cmds.values():
                 callbacks.on_start(cmd)
 
         q_ret = QRetriever(q, self.timeout, self.retries)
@@ -223,8 +234,8 @@ class CommandGroup(BaseModel):
                 else:
                     raise ValueError("Invalid Q message")  # pragma: no cover
 
-            if all(cmd.status.completed() for _, cmd in self.cmds.items()):
-                self.update_status()
+            if all(cmd.status.completed() for cmd in cmds.values()):
+                self.update_status(cmds)
                 break
         return grp_exit_code
 
@@ -363,7 +374,8 @@ def _get_optional_keys(data: tomlkit.items.Table, keys: list[str], default=None)
         keys (list[str]): The optional keys.
 
     """
-    return tuple(data.get(key, default) for key in keys)
+    res = tuple(data.get(key, default) for key in keys)
+    return res
 
 
 def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
@@ -394,13 +406,14 @@ def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
             ["desc", "timeout", "retries"],
             default=None,
         )
-        (group_cont_on_fail,) = _get_optional_keys(group_data, ["continue_on_fail"], default="false")
+        (group_cont_on_fail, group_serial) = _get_optional_keys(group_data, ["cont_on_fail", "serial"], default=False)
 
         if not group_timeout:
             group_timeout = 30
         if not group_retries:
             group_retries = 3
-        group_cont_on_fail = bool(group_cont_on_fail and group_cont_on_fail.lower() == "true")
+        group_cont_on_fail = bool(group_cont_on_fail and group_cont_on_fail is True)
+        group_serial = bool(group_serial and group_serial is True)
 
         commands = OrderedDict()
         for cmd_data in group_data.get("commands", []):
@@ -415,6 +428,7 @@ def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
             timeout=group_timeout,
             retries=group_retries,
             cont_on_fail=group_cont_on_fail,
+            serial=group_serial,
         )
         command_groups.append(command_group)
 
