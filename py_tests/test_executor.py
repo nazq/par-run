@@ -52,7 +52,8 @@ def test_command_set_ret_code_success():
 
     msg = q.get()
     assert isinstance(msg, tuple)
-    assert len(msg) == 2
+    exp_msg_len = 2
+    assert len(msg) == exp_msg_len
     assert msg[0] == command.name
     assert msg[1] == "Hello, World!"
     exit_code = q.get()[1]
@@ -75,7 +76,8 @@ def test_command_set_ret_code_failure():
     msg = q.get()
 
     assert isinstance(msg, tuple)
-    assert len(msg) == 2
+    exp_msg_len = 2
+    assert len(msg) == exp_msg_len
     assert msg[0] == command.name
     exit_code = msg[1]
     command.set_ret_code(exit_code)
@@ -209,7 +211,7 @@ def test_command_group_part_fail():
     assert group_exit == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio()
 async def test_command_group_async():
     command1 = Command(name="test1", cmd="echo 'Hello, World!'")
     command2 = Command(name="test2", cmd="echo 'World, Hey!'")
@@ -242,7 +244,7 @@ async def test_command_group_async():
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio()
 async def test_command_group_async_part_fail():
     command1 = Command(name="test1", cmd="echo 'Hello, World!'")
     command2 = Command(name="test2", cmd="echo 'World, Hey!'; exit 1")
@@ -283,7 +285,8 @@ def test_run_command():
 
     msg = q.get()
     assert isinstance(msg, tuple)
-    assert len(msg) == 2
+    exp_msg_len = 2
+    assert len(msg) == exp_msg_len
     assert msg[0] == "Test"
     assert msg[1] == "Hello, World!"
     exit_code = q.get()[1]

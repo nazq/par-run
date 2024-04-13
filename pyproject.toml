@@ -102,6 +102,30 @@ line-length = 120
 indent-width = 4
 target-version = "py39"
 
+[tool.ruff.lint]
+extend-select = [
+    'Q',
+    'B',
+    'UP',
+    'I',
+    'F',
+    'PTH',
+    'PIE',
+    'TID',
+    'ERA',
+    'ARG',
+    'PL',
+    #'ANN',
+    'SIM',
+    'PERF',
+    'T20',
+]
+extend-ignore = ["S101", "FA100"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["par_run"]
+
+
 [tool.pytest.ini_options]
 addopts = "--cov src --cov-report html:.reports/html --cov-report term --random-order -p no:warnings -v"
 minversion = "8.0"
@@ -118,6 +142,7 @@ name = "Formatting"
 desc = "Code formatting commands."
 timeout = 5
 retries = 3 
+cont_on_fail = true # default is false
 
   [[tool.par-run.groups.commands]]
   name = "ruff_fmt"

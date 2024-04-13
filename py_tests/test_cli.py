@@ -19,7 +19,7 @@ from par_run.executor import Command, CommandGroup, CommandStatus
 runner = CliRunner()
 
 
-@pytest.fixture
+@pytest.fixture()
 def mock_command_group():
     command1 = Command(name="cmd1", cmd="echo 'Hello, World!'")
     command2 = Command(name="cmd2", cmd="echo 'Goodbye, World!'")
@@ -27,7 +27,7 @@ def mock_command_group():
     return CommandGroup(name="group1", cmds=commands)
 
 
-@pytest.fixture
+@pytest.fixture()
 def mock_command_group_part_fail():
     command1 = Command(name="cmd1", cmd="echo 'Hello, World!'")
     command2 = Command(name="cmd2", cmd="exit 1")
@@ -119,7 +119,8 @@ def test_start_web_server_running(mocker, tmp_path):
 
     # Setup: Mock get_process_port to return the correct port after the first loop iteration, ensuring it doesn't run out of values
     get_process_port_side_effect = itertools.chain(
-        [None, 8000], itertools.repeat(8000)
+        [None, 8000],
+        itertools.repeat(8000),
     )  # First call: None, subsequent calls: 8000 (port number)
     mocker.patch("par_run.cli.get_process_port", side_effect=get_process_port_side_effect)
 
@@ -258,11 +259,13 @@ def test_get_process_port(mocker):
     # Mock psutil.Process and its connections method
     mock_process = mocker.patch("par_run.cli.psutil.Process")
     mock_conn = mocker.MagicMock()
-    mock_conn.laddr.port = 8000  # Example port number
+    run_port = 8000
+    mock_conn.laddr.port = run_port
     mock_process.return_value.connections.return_value = [mock_conn]
 
-    port = get_process_port(1234)  # Example PID
-    assert port == 8000
+    example_pid = 1234
+    port = get_process_port(example_pid)
+    assert port == run_port
 
 
 def test_get_process_port_no_connections(mocker):

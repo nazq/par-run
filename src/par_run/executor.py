@@ -7,14 +7,15 @@ import multiprocessing as mp
 import os
 import queue
 import subprocess
+import time
 from collections import OrderedDict
 from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
 from queue import Queue
-import time
-from typing import List, Optional, Protocol, TypeVar, Union, Any
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any, Optional, Protocol, TypeVar, Union
+
 import tomlkit
+from pydantic import BaseModel, ConfigDict, Field
 
 # Type alias for a generic future.
 GenFuture = Union[Future, asyncio.Future]
@@ -52,7 +53,7 @@ class Command(BaseModel):
     passenv: Optional[list[str]] = Field(default=None)
     setenv: Optional[dict[str, str]] = Field(default=None)
     status: CommandStatus = CommandStatus.NOT_STARTED
-    unflushed: List[str] = Field(default=[], exclude=True)
+    unflushed: list[str] = Field(default=[], exclude=True)
     num_non_empty_lines: int = Field(default=0, exclude=True)
     ret_code: Optional[int] = Field(default=None, exclude=True)
     fut: Optional[GenFuture] = Field(default=None, exclude=True)
@@ -114,12 +115,12 @@ class QRetriever:
         while True:
             try:
                 return self.q.get(block=True, timeout=self.timeout)
-            except queue.Empty:
+            except queue.Empty:  # noqa: PERF203
                 if retry_count < self.retries:
                     retry_count += 1
                     continue
                 else:
-                    raise TimeoutError("Timeout waiting for command output")
+                    raise TimeoutError("Timeout waiting for command output") from None
 
     def __str__(self) -> str:
         return f"QRetriever(timeout={self.timeout}, retries={self.retries})"
@@ -133,6 +134,7 @@ class CommandGroup(BaseModel):
     cmds: OrderedDict[str, Command] = Field(default_factory=OrderedDict)
     timeout: int = Field(default=30)
     retries: int = Field(default=3)
+    cont_on_fail: bool = Field(default=False)
 
     async def run_async(
         self,
@@ -161,7 +163,7 @@ class CommandGroup(BaseModel):
             cmd.set_running()
         return self._process_q(q, strategy, callbacks)
 
-    def _process_q(
+    def _process_q(  # noqa: PLR0912
         self,
         q: Queue,
         strategy: ProcessingStrategy,
@@ -170,7 +172,7 @@ class CommandGroup(BaseModel):
         grp_exit_code = 0
 
         if strategy == ProcessingStrategy.ON_RECV:
-            for _, cmd in self.cmds.items():
+            for cmd in self.cmds.values():
                 callbacks.on_start(cmd)
 
         q_ret = QRetriever(q, self.timeout, self.retries)
@@ -217,7 +219,7 @@ class CommandGroup(BaseModel):
                 break
         return grp_exit_code
 
-    async def _process_q_async(
+    async def _process_q_async(  # noqa: PLR0912
         self,
         q: Queue,
         strategy: ProcessingStrategy,
@@ -226,7 +228,7 @@ class CommandGroup(BaseModel):
         grp_exit_code = 0
 
         if strategy == ProcessingStrategy.ON_RECV:
-            for _, cmd in self.cmds.items():
+            for cmd in self.cmds.values():
                 await callbacks.on_start(cmd)
 
         q_ret = QRetriever(q, self.timeout, self.retries)
@@ -279,10 +281,13 @@ def read_commands_ini(filename: Union[str, Path]) -> list[CommandGroup]:
     """Read a commands.ini file and return a list of CommandGroup objects.
 
     Args:
+    ----
         filename (Union[str, Path]): The filename of the commands.ini file.
 
     Returns:
+    -------
         list[CommandGroup]: A list of CommandGroup objects.
+
     """
     config = configparser.ConfigParser()
     config.read(filename)
@@ -293,8 +298,8 @@ def read_commands_ini(filename: Union[str, Path]) -> list[CommandGroup]:
             group_name = section.replace("group.", "")
             commands = OrderedDict()
             for name, cmd in config.items(section):
-                name = name.strip()
-                commands[name] = Command(name=name, cmd=cmd.strip())
+                clean_name = name.strip()
+                commands[clean_name] = Command(name=clean_name, cmd=cmd.strip())
             command_group = CommandGroup(name=group_name, cmds=commands)
             command_groups.append(command_group)
 
@@ -305,18 +310,20 @@ def write_commands_ini(filename: Union[str, Path], command_groups: list[CommandG
     """Write a list of CommandGroup objects to a commands.ini file.
 
     Args:
+    ----
         filename (Union[str, Path]): The filename of the commands.ini file.
         command_groups (list[CommandGroup]): A list of CommandGroup objects.
+
     """
     config = configparser.ConfigParser()
 
     for group in command_groups:
         section_name = f"group.{group.name}"
         config[section_name] = {}
-        for _, command in group.cmds.items():
+        for command in group.cmds.values():
             config[section_name][command.name] = command.cmd
 
-    with open(filename, "w", encoding="utf-8") as configfile:
+    with Path(filename).open("w", encoding="utf-8") as configfile:
         config.write(configfile)
 
 
@@ -324,8 +331,10 @@ def _validate_mandatory_keys(data: tomlkit.items.Table, keys: list[str], context
     """Validate that the mandatory keys are present in the data.
 
     Args:
+    ----
         data (tomlkit.items.Table): The data to validate.
         keys (list[str]): The mandatory keys.
+
     """
     vals = []
     for key in keys:
@@ -340,8 +349,10 @@ def _get_optional_keys(data: tomlkit.items.Table, keys: list[str], default=None)
     """Get Optional keys or default.
 
     Args:
+    ----
         data (tomlkit.items.Table): The data to use as source
         keys (list[str]): The optional keys.
+
     """
     return tuple(data.get(key, default) for key in keys)
 
@@ -350,13 +361,15 @@ def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
     """Read a commands.toml file and return a list of CommandGroup objects.
 
     Args:
+    ----
         filename (Union[str, Path]): The filename of the commands.toml file.
 
     Returns:
+    -------
         list[CommandGroup]: A list of CommandGroup objects.
-    """
 
-    with open(filename, "r", encoding="utf-8") as toml_file:
+    """
+    with Path(filename).open(encoding="utf-8") as toml_file:
         toml_data = tomlkit.parse(toml_file.read())
 
     cmd_groups_data = toml_data.get("tool", {}).get("par-run", {})
@@ -368,13 +381,17 @@ def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
     for group_data in cmd_groups_data.get("groups", []):
         (group_name,) = _validate_mandatory_keys(group_data, ["name"], "top level par-run group")
         group_desc, group_timeout, group_retries = _get_optional_keys(
-            group_data, ["desc", "timeout", "retries"], default=None
+            group_data,
+            ["desc", "timeout", "retries"],
+            default=None,
         )
+        (group_cont_on_fail,) = _get_optional_keys(group_data, ["continue_on_fail"], default="false")
 
         if not group_timeout:
             group_timeout = 30
         if not group_retries:
             group_retries = 3
+        group_cont_on_fail = bool(group_cont_on_fail and group_cont_on_fail.lower() == "true")
 
         commands = OrderedDict()
         for cmd_data in group_data.get("commands", []):
@@ -383,7 +400,12 @@ def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
 
             commands[name] = Command(name=name, cmd=exec, setenv=setenv, passenv=passenv)
         command_group = CommandGroup(
-            name=group_name, desc=group_desc, cmds=commands, timeout=group_timeout, retries=group_retries
+            name=group_name,
+            desc=group_desc,
+            cmds=commands,
+            timeout=group_timeout,
+            retries=group_retries,
+            cont_on_fail=group_cont_on_fail,
         )
         command_groups.append(command_group)
 
@@ -396,10 +418,11 @@ def run_command(name: str, command: str, setenv: Optional[dict[str, str]], q: Qu
     with the return code.
 
     Args:
+    ----
         name (Command): Command to run.
         q (Queue): Queue to put the output into.
-    """
 
+    """
     new_env = None
     if setenv:
         new_env = os.environ.copy()

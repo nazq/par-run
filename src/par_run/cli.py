@@ -1,9 +1,10 @@
 """CLI for running commands in parallel"""
 
+import contextlib
+import enum
 from collections import OrderedDict
 from pathlib import Path
-from typing import Optional
-import enum
+from typing import Annotated, Optional
 
 import rich
 import typer
@@ -17,19 +18,17 @@ cli_app = typer.Typer()
 
 # Web only functions
 def clean_up():
-    """
-    Clean up by removing the PID file.
-    """
-    os.remove(PID_FILE)
+    """Clean up by removing the PID file."""
+    Path(PID_FILE).unlink()
     typer.echo("Cleaned up PID file.")
 
 
 def start_web_server(port: int):
     """Start the web server"""
-    if os.path.isfile(PID_FILE):
+    if Path(PID_FILE).is_file():
         typer.echo("UVicorn server is already running.")
         sys.exit(1)
-    with open(PID_FILE, "w", encoding="utf-8") as pid_file:
+    with Path(PID_FILE).open("w", encoding="utf-8") as pid_file:
         typer.echo(f"Starting UVicorn server on port {port}...")
         uvicorn_command = [
             "uvicorn",
@@ -59,21 +58,17 @@ def start_web_server(port: int):
 
 
 def stop_web_server():
-    """
-    Stop the UVicorn server by reading its PID from the PID file and sending a termination signal.
-    """
+    """Stop the UVicorn server by reading its PID from the PID file and sending a termination signal."""
     if not Path(PID_FILE).is_file():
         typer.echo("UVicorn server is not running.")
         return
 
-    with open(PID_FILE, "r") as pid_file:
+    with Path(PID_FILE).open() as pid_file:
         pid = int(pid_file.read().strip())
 
     typer.echo(f"Stopping UVicorn server with {pid=:}...")
-    try:
+    with contextlib.suppress(ProcessLookupError):
         os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
     clean_up()
 
 
@@ -89,13 +84,12 @@ def get_process_port(pid: int) -> Optional[int]:
 def list_uvicorn_processes():
     """Check for other UVicorn processes and list them"""
     uvicorn_processes = []
-    for process in psutil.process_iter():
-        try:
+    with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        for process in psutil.process_iter():
             process_name = process.name()
             if "uvicorn" in process_name.lower():
                 uvicorn_processes.append(process)
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
+
     if uvicorn_processes:
         typer.echo("Other UVicorn processes:")
         for process in uvicorn_processes:
@@ -105,15 +99,13 @@ def list_uvicorn_processes():
 
 
 def get_web_server_status():
-    """
-    Get the status of the UVicorn server by reading its PID from the PID file.
-    """
-    if not os.path.isfile(PID_FILE):
+    """Get the status of the UVicorn server by reading its PID from the PID file."""
+    if not Path(PID_FILE).is_file():
         typer.echo("No pid file found. Server likely not running.")
         list_uvicorn_processes()
         return
 
-    with open(PID_FILE, "r") as pid_file:
+    with Path(PID_FILE).open() as pid_file:
         pid = int(pid_file.read().strip())
         if psutil.pid_exists(pid):
             port = get_process_port(pid)
@@ -169,14 +161,16 @@ class CLICommandCBOnRecv:
 
 
 def format_elapsed_time(seconds: float) -> str:
-    """
-    Converts a number of seconds into a human-readable time format of HH:MM:SS.xxx
+    """Converts a number of seconds into a human-readable time format of HH:MM:SS.xxx
 
     Args:
+    ----
     seconds (float): The number of seconds elapsed.
 
     Returns:
+    -------
     str: The formatted time string.
+
     """
     hours = int(seconds) // 3600
     minutes = (int(seconds) % 3600) // 60
@@ -186,24 +180,31 @@ def format_elapsed_time(seconds: float) -> str:
     return f"{hours:02}:{minutes:02}:{seconds:06.3f}"
 
 
+style_default = typer.Option(help="Processing strategy", default="comp")
+show_default = typer.Option(help="Show available groups and commands", default=False)
+pyproj_default = typer.Option(help="The default toml file to use", default=Path("pyproject.toml"))
+groups_default = typer.Option(help="Run a specific group of commands, comma spearated", default=None)
+cmds_default = typer.Option(help="Run specific commands, comma separated", default=None)
+
+
 @cli_app.command()
-def run(
-    style: ProcessingStrategy = typer.Option(help="Processing strategy", default="comp"),
-    show: bool = typer.Option(help="Show available groups and commands", default=False),
-    file: Path = typer.Option(help="The commands.ini file to use", default=Path("pyproject.toml")),
-    groups: Optional[str] = typer.Option(None, help="Run a specific group of commands, comma spearated"),
-    cmds: Optional[str] = typer.Option(None, help="Run a specific commands, comma spearated"),
+def run(  # noqa: PLR0912
+    style: Annotated[ProcessingStrategy, typer.Option] = style_default,
+    show: Annotated[bool, typer.Option] = show_default,
+    file: Annotated[Path, typer.Option] = pyproj_default,
+    groups: Annotated[Optional[str], typer.Option] = groups_default,
+    cmds: Annotated[Optional[str], typer.Option] = cmds_default,
 ):
     """Run commands in parallel"""
     # Overall exit code, need to track all command exit codes to update this
     exit_code = 0
     st_all = time.perf_counter()
-    # console = rich.console.Console()
+
     master_groups = read_commands_toml(file)
     if show:
         for grp in master_groups:
             rich.print(f"[blue bold]Group: {grp.name}[/]")
-            for _, cmd in grp.cmds.items():
+            for cmd in grp.cmds.values():
                 rich.print(f"[green bold]{cmd.name}[/]: {cmd.cmd}")
         return
 
@@ -217,7 +218,7 @@ def run(
                     cmd_name: cmd
                     for cmd_name, cmd in grp.cmds.items()
                     if cmd_name in [c.strip() for c in cmds.split(",")]
-                }
+                },
             )
         master_groups = [grp for grp in master_groups if grp.cmds]
 
@@ -227,38 +228,36 @@ def run(
 
     for grp in master_groups:
         if style == ProcessingStrategy.ON_COMP:
-            exit_code = exit_code or grp.run(style, CLICommandCBOnComp())
+            exit_code = grp.run(style, CLICommandCBOnComp())
         elif style == ProcessingStrategy.ON_RECV:
-            exit_code = exit_code or grp.run(style, CLICommandCBOnRecv())
+            exit_code = grp.run(style, CLICommandCBOnRecv())
         else:
             raise typer.BadParameter("Invalid processing strategy")
+        if exit_code != 0 and not grp.cont_on_fail:
+            break
 
     # Summarise the results
     console = rich.console.Console()
+    res_tbl = rich.table.Table(title="Results", show_header=True, header_style="bold blue")
+    res_tbl.add_column("Group", style="bold blue", width=10)
+    res_tbl.add_column("Name", style="bold blue", width=15)
+    res_tbl.add_column("Exec", style="bold blue", width=50, no_wrap=True)
+    res_tbl.add_column("Status", style="bold blue", width=6)
+    res_tbl.add_column("Elapsed", style="bold blue", width=12)
     for grp in master_groups:
-        console.print(f"[blue bold]Group: {grp.name}[/]")
-        for _, cmd in grp.cmds.items():
-            elap_str = ""
-            if cmd.elapsed:
-                elap_str = f", {format_elapsed_time(cmd.elapsed)}"
-            else:
-                elap_str = ", XX:XX:XX.xxx"
+        for cmd in grp.cmds.values():
+            elap_str = format_elapsed_time(cmd.elapsed) if cmd.elapsed else "XX:XX:XX.xxx"
 
             if cmd.status == CommandStatus.SUCCESS:
-                left_seg = f"[green bold]Command {cmd.name} succeeded "
+                cmd_status = "✅"
+            elif cmd.status == CommandStatus.FAILURE:
+                cmd_status = "❌"
             else:
-                left_seg = f"[red bold]Command {cmd.name} failed "
+                cmd_status = "[yellow]❓[/]"
 
-            right_seg = f"({cmd.num_non_empty_lines}{elap_str})[/]"
-
-            # Adjust total line width dynamically based on max width and other content
-            pad_length = (
-                100 - len(left_seg) - len(right_seg) - 10
-                if "succeeded" in left_seg
-                else 100 - len(left_seg) - len(right_seg) - 12
-            )
-
-            rich.print(f"{left_seg}{' ' * pad_length}{right_seg}")
+            row_style = "green" if cmd.status == CommandStatus.SUCCESS else "red"
+            res_tbl.add_row(grp.name, cmd.name, cmd.cmd, cmd_status, elap_str, style=row_style)
+    console.print(res_tbl)
     end_style = "[green bold]" if exit_code == 0 else "[red bold]"
     rich.print(f"\n{end_style}Total elapsed time: {format_elapsed_time(time.perf_counter() - st_all)}[/]")
     raise typer.Exit(exit_code)
@@ -280,10 +279,13 @@ try:
 
     PID_FILE = ".par-run.uvicorn.pid"
 
+    command_default = typer.Argument(..., help="command to control/interract with the web server")
+    port_default = typer.Option(8001, help="Port to run the web server")
+
     @cli_app.command()
     def web(
-        command: WebCommand = typer.Argument(..., help="command to control/interract with the web server"),
-        port: int = typer.Option(8001, help="Port to run the web server"),
+        command: WebCommand = command_default,
+        port: int = port_default,
     ):
         """Run the web server"""
         if command == WebCommand.START:

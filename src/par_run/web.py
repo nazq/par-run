@@ -1,12 +1,13 @@
 """Web UI Module"""
 
 from pathlib import Path
+
 import rich
 from fastapi import Body, FastAPI, Request, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .executor import Command, CommandGroup, ProcessingStrategy, read_commands_ini, write_commands_ini
+from .executor import Command, ProcessingStrategy, read_commands_ini, write_commands_ini
 
 BASE_PATH = Path(__file__).resolve().parent
 
@@ -18,7 +19,6 @@ templates = Jinja2Templates(directory=str(BASE_PATH / "templates"))
 @ws_app.get("/")
 async def ws_main(request: Request):
     """Get the main page."""
-    print("Main page")
     return templates.TemplateResponse("index.html", {"request": request})
 
 
@@ -29,7 +29,7 @@ async def get_commands_config():
 
 
 @ws_app.post("/update-commands-config")
-async def update_commands_config(updated_config: list[CommandGroup] = Body(...)):
+async def update_commands_config(updated_config=Body(...)):  # noqa: B008
     """Update the commands configuration."""
     write_commands_ini("commands.ini", updated_config)
     return {"message": "Configuration updated successfully"}
@@ -56,10 +56,8 @@ async def websocket_endpoint(websocket: WebSocket):
     """Websocket endpoint to run commands."""
     rich.print("Websocket connection")
     master_groups = read_commands_ini("commands.ini")
-    print(master_groups)
     await websocket.accept()
     cb = WebCommandCB(websocket)
-    print("Running commands")
     exit_code = 0
     for grp in master_groups:
         exit_code = exit_code or await grp.run_async(ProcessingStrategy.ON_RECV, cb)
