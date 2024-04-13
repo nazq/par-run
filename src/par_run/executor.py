@@ -135,6 +135,14 @@ class CommandGroup(BaseModel):
     timeout: int = Field(default=30)
     retries: int = Field(default=3)
     cont_on_fail: bool = Field(default=False)
+    status: CommandStatus = CommandStatus.NOT_STARTED
+
+    def update_status(self):
+        """Update the status of the command group."""
+        if all(cmd.status == CommandStatus.SUCCESS for _, cmd in self.cmds.items()):
+            self.status = CommandStatus.SUCCESS
+        else:
+            self.status = CommandStatus.FAILURE
 
     async def run_async(
         self,
@@ -216,6 +224,7 @@ class CommandGroup(BaseModel):
                     raise ValueError("Invalid Q message")  # pragma: no cover
 
             if all(cmd.status.completed() for _, cmd in self.cmds.items()):
+                self.update_status()
                 break
         return grp_exit_code
 

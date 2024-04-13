@@ -9,7 +9,7 @@ from typing import Annotated, Optional
 import rich
 import typer
 
-from .executor import Command, CommandStatus, ProcessingStrategy, read_commands_toml
+from .executor import Command, CommandGroup, CommandStatus, ProcessingStrategy, read_commands_toml
 
 PID_FILE = ".par-run.uvicorn.pid"
 
@@ -180,6 +180,78 @@ def format_elapsed_time(seconds: float) -> str:
     return f"{hours:02}:{minutes:02}:{seconds:06.3f}"
 
 
+def show_commands(groups: list[CommandGroup]):
+    for grp in groups:
+        rich.print(f"[blue bold]Group: {grp.name}[/]")
+        for cmd in grp.cmds.values():
+            rich.print(f"[green bold]{cmd.name}[/]: {cmd.cmd}")
+
+
+def filter_groups(
+    group_list: list[CommandGroup], filter_groups: Optional[str], filter_cmds: Optional[str]
+) -> list[CommandGroup]:
+    if filter_groups:
+        group_list = [grp for grp in group_list if grp.name in [g.strip() for g in filter_groups.split(",")]]
+
+    if filter_cmds:
+        for grp in group_list:
+            grp.cmds = OrderedDict(
+                {
+                    cmd_name: cmd
+                    for cmd_name, cmd in grp.cmds.items()
+                    if cmd_name in [c.strip() for c in filter_cmds.split(",")]
+                },
+            )
+        group_list = [grp for grp in group_list if grp.cmds]
+    return group_list
+
+
+def add_table_break(tbl: rich.table.Table, break_ch: str = "-", break_style: Optional[str] = None) -> rich.table.Table:
+    break_data: list[str] = [break_ch * int(col.width) for col in tbl.columns if col.width is not None]
+    tbl.add_row(
+        *break_data,
+        style=break_style,
+    )
+    return tbl
+
+
+def build_results_tbl() -> rich.table.Table:
+    res_tbl = rich.table.Table(title="Results", show_header=True, header_style="bold blue", box=rich.box.ROUNDED)
+    group_w, name_w, cmd_w, status_w, elap_w = (10, 15, 50, 6, 12)
+    res_tbl.add_column("Group", style="bold blue", width=group_w, no_wrap=True)
+    res_tbl.add_column("Name", style="bold blue", width=name_w, no_wrap=True)
+    res_tbl.add_column("Command", style="bold blue", width=cmd_w, no_wrap=True)
+    res_tbl.add_column("Status", style="bold blue", width=status_w, no_wrap=True)
+    res_tbl.add_column("Elapsed", style="bold blue", width=elap_w, no_wrap=True)
+    return res_tbl
+
+
+def add_command_row(tbl: rich.table.Table, cmd: Command, group_name: str) -> rich.table.Table:
+    elap_str = format_elapsed_time(cmd.elapsed) if cmd.elapsed else "XX:XX:XX.xxx"
+
+    if cmd.status == CommandStatus.SUCCESS:
+        cmd_status = "✅"
+        row_style = "green"
+    elif cmd.status == CommandStatus.FAILURE:
+        cmd_status = "❌"
+        row_style = "red"
+    else:
+        cmd_status = "⏳"
+        row_style = "yellow"
+
+    tbl.add_row(group_name, cmd.name, cmd.cmd, cmd_status, elap_str, style=row_style)
+    return tbl
+
+
+def fmt_group_name(cmd_group: CommandGroup) -> str:
+    if cmd_group.status == CommandStatus.SUCCESS:
+        return f"[green]{cmd_group.name}[/]"
+    elif cmd_group.status == CommandStatus.FAILURE:
+        return f"[red]{cmd_group.name}[/]"
+    else:
+        return f"[yellow]{cmd_group.name}[/]"
+
+
 style_default = typer.Option(help="Processing strategy", default="comp")
 show_default = typer.Option(help="Show available groups and commands", default=False)
 pyproj_default = typer.Option(help="The default toml file to use", default=Path("pyproject.toml"))
@@ -188,7 +260,7 @@ cmds_default = typer.Option(help="Run specific commands, comma separated", defau
 
 
 @cli_app.command()
-def run(  # noqa: PLR0912
+def run(
     style: Annotated[ProcessingStrategy, typer.Option] = style_default,
     show: Annotated[bool, typer.Option] = show_default,
     file: Annotated[Path, typer.Option] = pyproj_default,
@@ -202,25 +274,9 @@ def run(  # noqa: PLR0912
 
     master_groups = read_commands_toml(file)
     if show:
-        for grp in master_groups:
-            rich.print(f"[blue bold]Group: {grp.name}[/]")
-            for cmd in grp.cmds.values():
-                rich.print(f"[green bold]{cmd.name}[/]: {cmd.cmd}")
-        return
+        return show_commands(master_groups)
 
-    if groups:
-        master_groups = [grp for grp in master_groups if grp.name in [g.strip() for g in groups.split(",")]]
-
-    if cmds:
-        for grp in master_groups:
-            grp.cmds = OrderedDict(
-                {
-                    cmd_name: cmd
-                    for cmd_name, cmd in grp.cmds.items()
-                    if cmd_name in [c.strip() for c in cmds.split(",")]
-                },
-            )
-        master_groups = [grp for grp in master_groups if grp.cmds]
+    master_groups = filter_groups(master_groups, groups, cmds)
 
     if not master_groups:
         rich.print("[blue]No groups or commands found.[/]")
@@ -238,25 +294,17 @@ def run(  # noqa: PLR0912
 
     # Summarise the results
     console = rich.console.Console()
-    res_tbl = rich.table.Table(title="Results", show_header=True, header_style="bold blue")
-    res_tbl.add_column("Group", style="bold blue", width=10)
-    res_tbl.add_column("Name", style="bold blue", width=15)
-    res_tbl.add_column("Exec", style="bold blue", width=50, no_wrap=True)
-    res_tbl.add_column("Status", style="bold blue", width=6)
-    res_tbl.add_column("Elapsed", style="bold blue", width=12)
-    for grp in master_groups:
-        for cmd in grp.cmds.values():
-            elap_str = format_elapsed_time(cmd.elapsed) if cmd.elapsed else "XX:XX:XX.xxx"
+    res_tbl = build_results_tbl()
 
-            if cmd.status == CommandStatus.SUCCESS:
-                cmd_status = "✅"
-            elif cmd.status == CommandStatus.FAILURE:
-                cmd_status = "❌"
-            else:
-                cmd_status = "[yellow]❓[/]"
+    for grp_ix, grp in enumerate(master_groups):
+        for ix, cmd in enumerate(grp.cmds.values()):
+            if grp_ix > 0 and ix == 0:
+                add_table_break(res_tbl)
+            grp_name = fmt_group_name(grp)
+            if ix > 0:
+                grp_name = ""
+            add_command_row(res_tbl, cmd, grp_name)
 
-            row_style = "green" if cmd.status == CommandStatus.SUCCESS else "red"
-            res_tbl.add_row(grp.name, cmd.name, cmd.cmd, cmd_status, elap_str, style=row_style)
     console.print(res_tbl)
     end_style = "[green bold]" if exit_code == 0 else "[red bold]"
     rich.print(f"\n{end_style}Total elapsed time: {format_elapsed_time(time.perf_counter() - st_all)}[/]")
