@@ -291,7 +291,7 @@ def run(
         elif style == ProcessingStrategy.ON_RECV:
             exit_code = grp.run(style, CLICommandCBOnRecv())
         else:
-            raise typer.BadParameter("Invalid processing strategy")
+            raise typer.BadParameter("Invalid processing strategy")  # pragma: no cover
         if exit_code != 0 and not grp.cont_on_fail:
             break
 

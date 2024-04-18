@@ -3,11 +3,11 @@
 from pathlib import Path
 
 import rich
-from fastapi import Body, FastAPI, Request, WebSocket
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .executor import Command, ProcessingStrategy, read_commands_ini, write_commands_ini
+from .executor import Command, CommandStatus, ProcessingStrategy, read_commands_toml
 
 BASE_PATH = Path(__file__).resolve().parent
 
@@ -25,14 +25,7 @@ async def ws_main(request: Request):
 @ws_app.get("/get-commands-config")
 async def get_commands_config():
     """Get the commands configuration."""
-    return read_commands_ini("commands.ini")
-
-
-@ws_app.post("/update-commands-config")
-async def update_commands_config(updated_config=Body(...)):  # noqa: B008
-    """Update the commands configuration."""
-    write_commands_ini("commands.ini", updated_config)
-    return {"message": "Configuration updated successfully"}
+    return read_commands_toml("commands.toml")
 
 
 class WebCommandCB:
@@ -48,6 +41,10 @@ class WebCommandCB:
         await self.ws.send_json({"commandName": cmd.name, "output": output})
 
     async def on_term(self, cmd: Command, exit_code: int):
+        if cmd.status == CommandStatus.SUCCESS:
+            rich.print(f"[green bold]Command {cmd.name} finished[/]")
+        elif cmd.status == CommandStatus.FAILURE:
+            rich.print(f"[red bold]Command {cmd.name} failed, {exit_code=:}[/]")
         await self.ws.send_json({"commandName": cmd.name, "output": {"ret_code": exit_code}})
 
 
@@ -55,7 +52,7 @@ class WebCommandCB:
 async def websocket_endpoint(websocket: WebSocket):
     """Websocket endpoint to run commands."""
     rich.print("Websocket connection")
-    master_groups = read_commands_ini("commands.ini")
+    master_groups = read_commands_toml("commands.toml")
     await websocket.accept()
     cb = WebCommandCB(websocket)
     exit_code = 0

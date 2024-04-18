@@ -1,0 +1,49 @@
+
+name: dev workflow
+
+# Controls when the action will run.
+on:
+  # Triggers the workflow on push or pull request events but only for the master branch
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  test:
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      matrix:
+        python-versions: [3.9]
+        platform:
+          - runner: ubuntu-latest
+            target: x86_64
+
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+    - uses: actions/checkout@v4
+    - name: Set up rye
+      run: curl -sSf https://rye-up.com/get | RYE_TOOLCHAIN_VERSION=3.9 RYE_INSTALL_OPTION="--yes" bash
+    - name: Add Rye to PATH
+      run: |
+        echo "$HOME/.rye/env" >> $GITHUB_PATH
+        echo "$HOME/.rye/shims" >> $GITHUB_PATH
+      shell: bash
+    - name: Verify Rye Installation
+      run: rye --version
+      shell: bash
+    - name: Set output
+      run: echo "status=success" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Use uv instead of pip
+      run: rye config --set-bool behavior.use-uv=true
+
+    - name: Sync dependencies using rye
+      run: |
+        rye pin ${{ matrix.python-versions }}
+        rye sync

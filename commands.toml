@@ -1,0 +1,80 @@
+[par-run]
+desc = "par-run from pyproject.toml"
+
+[[par-run.groups]]
+name = "Formatting"
+desc = "Code formatting commands."
+timeout = 5
+retries = 3 
+cont_on_fail = true # default is false
+serial = false # default is false
+
+  [[par-run.groups.commands]]
+  name = "ruff_fmt" 
+  exec = "ruff format src py_tests"
+  # Define an empty extras using standard table notation, or simply omit it if it's always empty
+
+  [[par-run.groups.commands]]
+  name = "ruff_fix"
+  exec = "ruff check --fix src py_tests"
+  # Define an empty extras using standard table notation, or simply omit it if it's always empty
+
+
+[[par-run.groups]]
+name = "Quality"
+desc = "Code Quality Tools. No code mutation"
+timeout = 5
+retries = 3
+cont_on_fail = true # default is false
+
+  [[par-run.groups.commands]]
+  name = "ruff_lint"
+  exec = "ruff check src py_tests"
+  # extras omitted as it's empty
+
+  [[par-run.groups.commands]]
+  name = "mypy"
+  exec = "mypy src"
+  setenv = {NODE_ENV = "production", ENABLE_LOGS = "true"}
+
+  [[par-run.groups.commands]]
+  name = "pytest"
+  exec = "pytest py_tests"
+  setenv = {NODE_ENV = "production", ENABLE_LOGS = "true"}
+
+
+[[par-run.groups]]
+name = "ENV"
+desc = "Code Quality Tools. No code mutation"
+timeout = 5
+retries = 3
+cont_on_fail = true # default is false
+
+
+  [[par-run.groups.commands]]
+  name = "full_env"
+  exec = "env"
+  setenv = {MY_VAR = "production", ENABLE_LOGS = "true"}
+
+  [[par-run.groups.commands]]
+  name = "my_var"
+  exec = "echo \"MY_VAR=$MY_VAR\", \"ENABLE_LOGS=$ENABLE_LOGS\""
+  setenv = {MY_VAR = "production", ENABLE_LOGS = "true"}
+
+
+[[par-run.groups]]
+name = "Serial"
+desc = "Must run serially"
+timeout = 5
+retries = 3
+cont_on_fail = false # default is false
+serial = true
+
+
+  [[par-run.groups.commands]]
+  name = "sleep then create file"
+  exec = "sleep 2 && touch /tmp/test.pr"
+  
+  [[par-run.groups.commands]]
+  name = "try delete file"
+  exec = "rm /tmp/test.pr"
