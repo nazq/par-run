@@ -6,8 +6,13 @@ from typer.testing import CliRunner
 
 from par_run.cli import (
     CLICommandCBOnComp,
+    CLICommandCBOnRecv,
+    add_command_row,
+    add_table_break,
+    build_results_tbl,
     clean_up,
     cli_app,
+    fmt_group_name,
     get_process_port,
     get_web_server_status,
     list_uvicorn_processes,
@@ -150,6 +155,13 @@ def test_stop_web_server(mocker, tmp_path):
     assert not pid_file.exists()
 
 
+def test_stop_web_server_no_pid_file(mocker, tmp_path):
+    pid_file = tmp_path / ".par-run.uvicorn.pid"
+    mocker.patch("par_run.cli.PID_FILE", str(pid_file))
+    mocker.patch("par_run.cli.os.kill")
+    stop_web_server()
+
+
 def test_get_web_server_status(mocker, tmp_path):
     pid_file = tmp_path / ".par-run.uvicorn.pid"
     mocker.patch("par_run.cli.PID_FILE", str(pid_file))
@@ -164,6 +176,22 @@ def test_get_web_server_status(mocker, tmp_path):
     mocker.patch("par_run.cli.psutil.pid_exists", return_value=True)
     mocker.patch("par_run.cli.get_process_port", return_value=8000)
     get_web_server_status()
+
+
+def test_run_with_on_recv(mocker, mock_command_group):
+    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
+    mocker.patch("par_run.cli.rich.print")
+    result = runner.invoke(cli_app, ["run", "--style", "recv"])
+    assert result.exit_code == 0
+    read_mock.assert_called_once()
+
+
+def test_run_with_on_comp(mocker, mock_command_group):
+    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
+    mocker.patch("par_run.cli.rich.print")
+    result = runner.invoke(cli_app, ["run", "--style", "comp"])
+    assert result.exit_code == 0
+    read_mock.assert_called_once()
 
 
 def test_run_with_specific_groups(mocker, mock_command_group):
@@ -363,3 +391,87 @@ def test_get_web_server_status_running_no_port(mocker, tmp_path):
 
     # Verify: Check that the appropriate message is output when the port cannot be determined
     mock_echo.assert_any_call("UVicorn server is running with pid=1234, couldn't determine port.")
+
+
+def test_web_command_enum():
+    from par_run.cli import WebCommand
+
+    for cmd in WebCommand:
+        assert isinstance(cmd.value, str)
+        assert str(cmd) == cmd.value
+
+
+def test_command_cb_comp_success(mocker):
+    mocker.patch("par_run.cli.rich.print")
+    cb = CLICommandCBOnComp()
+    command = Command(name="cmd1", cmd="echo 'Hello'")
+    cb.on_start(command)
+    cb.on_recv(command, "Hello, World!")
+    command.status = CommandStatus.SUCCESS
+    cb.on_term(command, 0)
+
+
+def test_command_cb_comp_fail(mocker):
+    mocker.patch("par_run.cli.rich.print")
+    cb = CLICommandCBOnComp()
+    command = Command(name="cmd1", cmd="echo 'Hello'")
+    cb.on_start(command)
+    cb.on_recv(command, "Hello, World!")
+    command.status = CommandStatus.FAILURE
+    cb.on_term(command, 1)
+
+
+def test_command_cb_recv_success(mocker):
+    mocker.patch("par_run.cli.rich.print")
+    cb = CLICommandCBOnRecv()
+    command = Command(name="cmd1", cmd="echo 'Hello'")
+    cb.on_start(command)
+    cb.on_recv(command, "Hello, World!")
+    command.status = CommandStatus.SUCCESS
+    cb.on_term(command, 0)
+
+
+def test_command_cb_recv_fail(mocker):
+    mocker.patch("par_run.cli.rich.print")
+    cb = CLICommandCBOnRecv()
+    command = Command(name="cmd1", cmd="echo 'Hello'")
+    cb.on_start(command)
+    cb.on_recv(command, "Hello, World!")
+    command.status = CommandStatus.FAILURE
+    cb.on_term(command, 1)
+
+
+def test_results_table():
+    tbl = build_results_tbl()
+    cols = ["Group", "Name", "Command", "Status", "Elapsed"]
+    assert tbl is not None
+    assert len(tbl.columns) == len(cols)
+    tbl_cols = [col.header for col in tbl.columns]
+    assert all([col in tbl_cols for col in cols])
+    command = Command(name="cmd1", cmd="echo 'Hello'")
+    add_command_row(tbl, command, "group1")
+    add_table_break(tbl)
+    add_command_row(tbl, command, "group2")
+    add_table_break(tbl)
+    add_command_row(tbl, command, "group3")
+
+
+def test_fmt_group_name():
+    cmd_name = "group1"
+    cmd_grp = CommandGroup(name=cmd_name, cmds={})
+    cmd_grp.status = CommandStatus.SUCCESS
+    fmt_res = fmt_group_name(cmd_grp)
+    assert cmd_name in fmt_res
+    assert "[green]" in fmt_res
+
+    cmd_grp = CommandGroup(name=cmd_name, cmds={})
+    cmd_grp.status = CommandStatus.FAILURE
+    fmt_res = fmt_group_name(cmd_grp)
+    assert cmd_name in fmt_res
+    assert "[red]" in fmt_res
+
+    cmd_grp = CommandGroup(name=cmd_name, cmds={})
+    cmd_grp.status = CommandStatus.NOT_STARTED
+    fmt_res = fmt_group_name(cmd_grp)
+    assert cmd_name in fmt_res
+    assert "[yellow]" in fmt_res

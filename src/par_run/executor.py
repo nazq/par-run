@@ -1,7 +1,6 @@
 """Todo"""
 
 import asyncio
-import configparser
 import enum
 import multiprocessing as mp
 import os
@@ -297,56 +296,6 @@ class CommandGroup(BaseModel):
         return grp_exit_code
 
 
-def read_commands_ini(filename: Union[str, Path]) -> list[CommandGroup]:
-    """Read a commands.ini file and return a list of CommandGroup objects.
-
-    Args:
-    ----
-        filename (Union[str, Path]): The filename of the commands.ini file.
-
-    Returns:
-    -------
-        list[CommandGroup]: A list of CommandGroup objects.
-
-    """
-    config = configparser.ConfigParser()
-    config.read(filename)
-
-    command_groups = []
-    for section in config.sections():
-        if section.startswith("group."):
-            group_name = section.replace("group.", "")
-            commands = OrderedDict()
-            for name, cmd in config.items(section):
-                clean_name = name.strip()
-                commands[clean_name] = Command(name=clean_name, cmd=cmd.strip())
-            command_group = CommandGroup(name=group_name, cmds=commands)
-            command_groups.append(command_group)
-
-    return command_groups
-
-
-def write_commands_ini(filename: Union[str, Path], command_groups: list[CommandGroup]):
-    """Write a list of CommandGroup objects to a commands.ini file.
-
-    Args:
-    ----
-        filename (Union[str, Path]): The filename of the commands.ini file.
-        command_groups (list[CommandGroup]): A list of CommandGroup objects.
-
-    """
-    config = configparser.ConfigParser()
-
-    for group in command_groups:
-        section_name = f"group.{group.name}"
-        config[section_name] = {}
-        for command in group.cmds.values():
-            config[section_name][command.name] = command.cmd
-
-    with Path(filename).open("w", encoding="utf-8") as configfile:
-        config.write(configfile)
-
-
 def _validate_mandatory_keys(data: tomlkit.items.Table, keys: list[str], context: str) -> tuple[Any, ...]:
     """Validate that the mandatory keys are present in the data.
 
@@ -393,9 +342,15 @@ def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
     with Path(filename).open(encoding="utf-8") as toml_file:
         toml_data = tomlkit.parse(toml_file.read())
 
-    cmd_groups_data = toml_data.get("tool", {}).get("par-run", {})
+    if (isinstance(filename, Path) and filename.name == "pyproject.toml") or (
+        isinstance(filename, str) and filename == "pyproject.toml"
+    ):
+        cmd_groups_data = toml_data.get("tool", {}).get("par-run", {})
+    else:
+        cmd_groups_data = toml_data.get("par-run", None)
+
     if not cmd_groups_data:
-        raise ValueError("No par-run data found in toml file")
+        raise ValueError(f"No par-run data found in toml file {filename}")
     _ = cmd_groups_data.get("description", None)
 
     command_groups = []

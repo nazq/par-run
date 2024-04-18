@@ -58,6 +58,7 @@ dev-dependencies = [
     "pytest-cov>=5.0.0",
     "pytest-mock>=3.14.0",
     "pytest-random-order>=1.1.1",
+    "pytest-xdist>=3.5.0",
     "ruff>=0.3.4",
     "twine>=5.0.0",
     "types-toml>=0.10.8.20240310",
@@ -127,7 +128,7 @@ known-first-party = ["par_run"]
 
 
 [tool.pytest.ini_options]
-addopts = "--cov src --cov-report html:.reports/html --cov-report term --random-order -p no:warnings -v"
+addopts = "--cov src --cov-report html:.reports/html --cov-report term --random-order -p no:warnings -v -n auto"
 minversion = "8.0"
 pythonpath = ["src", "py_tests"]
 testpaths = "py_tests"
@@ -203,8 +204,9 @@ name = "Serial"
 desc = "Must run serially"
 timeout = 5
 retries = 3
-cont_on_fail = true # default is false
+cont_on_fail = false # default is false
 serial = true
+
 
   [[tool.par-run.groups.commands]]
   name = "sleep then create file"
@@ -213,3 +215,5 @@ serial = true
   [[tool.par-run.groups.commands]]
   name = "try delete file"
   exec = "rm /tmp/test.pr"
+
+

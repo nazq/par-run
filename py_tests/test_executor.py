@@ -1,17 +1,21 @@
 import multiprocessing as mp
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import Queue
 
 import pytest
+import tomlkit
 
 from par_run.executor import (
     Command,
     CommandGroup,
     CommandStatus,
     ProcessingStrategy,
-    read_commands_ini,
+    QRetriever,
+    _get_optional_keys,
+    _validate_mandatory_keys,
+    read_commands_toml,
     run_command,
-    write_commands_ini,
 )
 
 
@@ -293,43 +297,150 @@ def test_run_command():
     assert exit_code == 0
 
 
-def test_read_commands_ini(mocker, command_data, expected_command_groups):
-    # Mock ConfigParser and its methods
-    mock_config_parser = mocker.patch("par_run.executor.configparser.ConfigParser")
-    mock_config_instance = mock_config_parser.return_value
-    mock_config_instance.read = mocker.MagicMock()
-    mock_config_instance.sections.return_value = list(command_data.keys())
-    mock_config_instance.items.side_effect = lambda section: command_data[section]
+def test_validate_mandatory_keys():
+    data = tomlkit.table()
+    data["key1"] = "value1"
+    data["key2"] = "value2"
+    data["key3"] = "value3"
 
-    # Call the function under test
-    result = read_commands_ini("dummy_path")
+    keys = ["key1", "key2", "key3"]
+    context = "test_context"
 
-    # Assert the result
-    assert len(result) == len(expected_command_groups)
-    for res_group, exp_group in zip(result, expected_command_groups):
-        assert res_group.name == exp_group.name
-        assert list(res_group.cmds.keys()) == list(exp_group.cmds.keys())
-        for cmd_name in res_group.cmds:
-            assert res_group.cmds[cmd_name].cmd == exp_group.cmds[cmd_name].cmd
+    result = _validate_mandatory_keys(data, keys, context)
+    assert result == ("value1", "value2", "value3")
 
 
-def test_write_and_read_commands_ini(expected_command_groups, tmp_path):
-    # Use tmp_path to create a temporary file path for the INI file
-    temp_file = tmp_path / "commands.ini"
+def test_validate_mandatory_keys_missing_key():
+    data = tomlkit.table()
+    data["key1"] = "value1"
+    data["key3"] = "value3"
 
-    # Write the command groups to the temporary INI file
-    write_commands_ini(temp_file, expected_command_groups)
+    keys = ["key1", "key2", "key3"]
+    context = "test_context"
 
-    # Read back the command groups from the INI file
-    read_command_groups = read_commands_ini(temp_file)
+    with pytest.raises(ValueError) as exc_info:
+        _validate_mandatory_keys(data, keys, context)
 
-    # Compare the original command groups with the ones read from the file
-    assert len(expected_command_groups) == len(read_command_groups), "Number of command groups mismatch"
+    assert str(exc_info.value) == "key2 is mandatory, not found in test_context"
 
-    for original, read_back in zip(expected_command_groups, read_command_groups):
-        assert original.name == read_back.name, "Command group name mismatch"
-        assert len(original.cmds) == len(read_back.cmds), "Number of commands in a group mismatch"
 
-        for cmd_name, cmd in original.cmds.items():
-            assert cmd_name in read_back.cmds, f"Command {cmd_name} not found in read command group"
-            assert cmd.cmd == read_back.cmds[cmd_name].cmd, f"Command {cmd_name} mismatch"
+def test__get_optional_keys():
+    data = tomlkit.table()
+    data["key1"] = "value1"
+    data["key2"] = "value2"
+    data["key3"] = "value3"
+
+    keys = ["key1", "key2", "key3"]
+    expected_result = ("value1", "value2", "value3")
+    assert _get_optional_keys(data, keys) == expected_result
+
+    keys = ["key1", "key2", "key4"]
+    expected_result = ("value1", "value2", None)
+    assert _get_optional_keys(data, keys) == expected_result
+
+    keys = ["key4", "key5", "key6"]
+    expected_result = (None, None, None)
+    assert _get_optional_keys(data, keys) == expected_result
+
+    keys = []
+    expected_result = ()
+    assert _get_optional_keys(data, keys) == expected_result
+
+    data = tomlkit.table()
+    keys = ["key1", "key2", "key3"]
+    expected_result = (None, None, None)
+    assert _get_optional_keys(data, keys) == expected_result
+
+
+@pytest.mark.parametrize("filename", ["pyproject.toml", "commands.toml"])
+def test_read_commands_toml(filename):
+    command_groups = read_commands_toml(filename)
+    assert isinstance(command_groups, list)
+    assert len(command_groups) > 0
+    for group in command_groups:
+        assert isinstance(group, CommandGroup)
+        assert group.name
+        assert isinstance(group.desc, str) or group.desc is None
+        assert isinstance(group.cmds, OrderedDict)
+        assert isinstance(group.timeout, int)
+        assert isinstance(group.retries, int)
+        assert isinstance(group.cont_on_fail, bool)
+        assert isinstance(group.serial, bool)
+
+        for cmd_name, cmd in group.cmds.items():
+            assert isinstance(cmd, Command)
+            assert cmd.name == cmd_name
+            assert cmd.cmd
+
+    # Test case 2: Invalid commands.toml file
+    with pytest.raises(FileNotFoundError):
+        filename = "invalid_commands.toml"
+        read_commands_toml(filename)
+
+
+def test_read_commands_toml_missing_section(tmp_path):
+    # Create a valid TOML file without the par-run section
+    toml_content = """
+    [command_group]
+    name = "Test Group"
+    desc = "Test description"
+    timeout = 30
+    retries = 3
+    cont_on_fail = false
+    serial = false
+
+    [[command_group.cmds]]
+    name = "Test Command"
+    cmd = "echo 'Hello, World!'"
+    """
+
+    toml_file = tmp_path / "test_commands.toml"
+    toml_file.write_text(toml_content)
+
+    # Call the function and assert that it raises a ValueError
+    with pytest.raises(ValueError):
+        read_commands_toml(toml_file)
+
+
+@pytest.mark.parametrize("setenv", [None, {"key": "value"}])
+def test_run_command_w_env(setenv):
+    q = mp.Queue()
+    run_command("test", "echo 'Hello, World!'", setenv, q)
+    output = q.get()
+    assert output[0] == "test"
+    assert isinstance(output[1], (int, str))
+
+
+def test_qretriever_get():
+    q = Queue()
+    q.put("Hello, World!")
+    retriever = QRetriever(q, timeout=1, retries=0)
+    result = retriever.get()
+    assert result == "Hello, World!"
+
+
+def test_qretriever_get_timeout():
+    q = Queue()
+    retriever = QRetriever(q, timeout=1, retries=0)
+    try:
+        retriever.get()
+        raise AssertionError()
+    except TimeoutError as e:
+        assert str(e) == "Timeout waiting for command output"
+
+
+def test_qretriever_get_retry():
+    q = Queue()
+    retriever = QRetriever(q, timeout=1, retries=2)
+    try:
+        retriever.get()
+        raise AssertionError("TimeoutError not raised")
+    except TimeoutError as e:
+        assert str(e) == "Timeout waiting for command output"
+
+
+def test_qretriever_str():
+    q = Queue()
+    retriever = QRetriever(q, timeout=1, retries=0)
+    result = str(retriever)
+    assert result == "QRetriever(timeout=1, retries=0)"
