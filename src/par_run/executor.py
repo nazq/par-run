@@ -5,11 +5,12 @@ import os
 import subprocess
 import time
 from collections import OrderedDict
+from collections.abc import AsyncIterable
 from pathlib import Path
-from typing import Any, Optional, Protocol, Union
+from typing import Any, Optional, Protocol, Union, cast
 
+import anyio
 import tomlkit
-import trio
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -105,9 +106,8 @@ class CommandGroup(BaseModel):
 
     async def run(self, strategy: ProcessingStrategy, callbacks: CommandCB):
         try:
-            async with trio.open_nursery() as nursery:
+            async with anyio.create_task_group() as nursery:
                 for cmd in self.cmds.values():
-                    print(f"Running command {cmd.name}")
                     nursery.start_soon(self._run_command, cmd, strategy, callbacks)
                     cmd.set_running()
         except Exception as _:
@@ -115,45 +115,52 @@ class CommandGroup(BaseModel):
         else:
             self.update_status(self.cmds)
 
+    async def _proces_stdxx_line(self, cmd: Command, line: str, strategy: ProcessingStrategy, callbacks: CommandCB):
+        if strategy == ProcessingStrategy.ON_RECV:
+            await callbacks.on_recv(cmd, line)
+        elif strategy == ProcessingStrategy.ON_COMP:
+            cmd.append_unflushed(line)
+        cmd.incr_line_count(line)
+
+    async def _process_stdxxx(
+        self, cmd: Command, strategy: ProcessingStrategy, stream: AsyncIterable[bytes], callbacks: CommandCB
+    ):
+        incomplete_line = ""
+
+        async for chunk in stream:
+            # Decode the bytes to a string
+            decoded_chunk = chunk.decode("utf-8")
+            # Combine the remainder of the last chunk with the new chunk
+            lines = (incomplete_line + decoded_chunk).split("\n")
+
+            # The last line might be incomplete; hold it back
+            incomplete_line = lines.pop() if lines[-1] else ""
+
+            for line in lines:
+                await self._proces_stdxx_line(cmd, line, strategy, callbacks)
+
+        if incomplete_line:
+            await self._proces_stdxx_line(cmd, incomplete_line, strategy, callbacks)
+
     async def _run_command(self, cmd: Command, strategy: ProcessingStrategy, callbacks: CommandCB) -> int:
         env = os.environ.copy()
         if cmd.setenv:
             env.update(cmd.setenv)
 
-        try:
-            # Running the command asynchronously and capturing the output
-            process = await trio.lowlevel.open_process(
-                command=cmd.cmd, shell=True, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-            )
-            print(f"Running open_process {cmd.name}")
-            while True:
-                if process.stdout is None:
-                    raise ValueError("stdout is None")
-                out_bytes = await process.stdout.receive_some()
-                output_lines = out_bytes.decode().splitlines()
-                for line in output_lines:
-                    if strategy == ProcessingStrategy.ON_RECV:
-                        await callbacks.on_recv(cmd, line)
-                    elif strategy == ProcessingStrategy.ON_COMP:
-                        cmd.append_unflushed(line)
-                    cmd.incr_line_count(line)
-
-                if strategy == ProcessingStrategy.ON_COMP:
-                    for line in cmd.unflushed:
-                        await callbacks.on_recv(cmd, line)
-                    cmd.clear_unflushed()
-                await trio.sleep(0)
-                if process.returncode is not None:
-                    break
-
-            exit_code = process.returncode
+        # Running the command asynchronously and capturing the output
+        async with (
+            await anyio.open_process(
+                command=cmd.cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            ) as process,
+            anyio.create_task_group() as tg,
+        ):
+            if process.stdout:
+                tg.start_soon(self._process_stdxxx, cmd, strategy, process.stdout, callbacks)
+            await process.wait()
+            exit_code = cast(int, process.returncode)
             cmd.set_ret_code(exit_code)
             await callbacks.on_term(cmd, exit_code)
-
-        except Exception:
-            if not process or process.returncode is None:
-                return 999
-        return process.returncode
+            return exit_code
 
 
 def _validate_mandatory_keys(data: tomlkit.items.Table, keys: list[str], context: str) -> tuple[Any, ...]:

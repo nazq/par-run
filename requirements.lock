@@ -11,6 +11,7 @@
 annotated-types==0.6.0
     # via pydantic
 anyio==4.3.0
+    # via par-run
     # via starlette
     # via watchfiles
 attrs==23.2.0

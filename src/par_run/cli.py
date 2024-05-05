@@ -6,8 +6,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Annotated, Optional
 
+import anyio
 import rich
-import trio
 import typer
 
 from .executor import Command, CommandGroup, CommandStatus, ProcessingStrategy, read_commands_toml
@@ -289,9 +289,9 @@ def run(
     for grp in master_groups:
         # Run the async function with Trio's event loop
         if style == ProcessingStrategy.ON_COMP:
-            trio.run(grp.run, style, CLICommandCBOnComp())
+            anyio.run(grp.run, style, CLICommandCBOnComp())
         elif style == ProcessingStrategy.ON_RECV:
-            trio.run(grp.run, style, CLICommandCBOnRecv())
+            anyio.run(grp.run, style, CLICommandCBOnRecv())
         else:
             raise typer.BadParameter("Invalid processing strategy")  # pragma: no cover
 
