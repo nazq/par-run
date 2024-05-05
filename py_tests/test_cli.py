@@ -47,29 +47,29 @@ def test_run(mocker, mock_command_group):
     assert result.exit_code == 0
 
 
-def test_CLICommandCB_on_start(mocker):
+async def test_CLICommandCB_on_start(mocker):
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
-    cb.on_start(command)
+    await cb.on_start(command)
     mock_rich_print.assert_called_once()
 
 
-def test_CLICommandCB_on_recv(mocker):
+async def test_CLICommandCB_on_recv(mocker):
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
-    cb.on_recv(command, "Hello, World!")
+    await cb.on_recv(command, "Hello, World!")
     mock_rich_print.assert_called_once_with("Hello, World!")
 
 
 @pytest.mark.parametrize("status", [CommandStatus.SUCCESS, CommandStatus.FAILURE])
-def test_CLICommandCB_on_term(mocker, status):
+async def test_CLICommandCB_on_term(mocker, status):
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
     command.status = status
-    cb.on_term(command, 0)
+    await cb.on_term(command, 0)
     assert mock_rich_print.called
 
 

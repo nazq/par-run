@@ -54,7 +54,9 @@ async def websocket_endpoint(websocket: WebSocket):
     rich.print("Websocket connection")
     master_groups = read_commands_toml("commands.toml")
     await websocket.accept()
+    rich.print("Websocket accepted")
     cb = WebCommandCB(websocket)
     exit_code = 0
+    rich.print("Websocket command cb created")
     for grp in master_groups:
-        exit_code = exit_code or await grp.run_async(ProcessingStrategy.ON_RECV, cb)
+        exit_code = exit_code or await grp.run(ProcessingStrategy.ON_RECV, cb)

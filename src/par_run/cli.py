@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import rich
+import trio
 import typer
 
 from .executor import Command, CommandGroup, CommandStatus, ProcessingStrategy, read_commands_toml
@@ -131,13 +132,13 @@ class WebCommand(enum.Enum):
 
 
 class CLICommandCBOnComp:
-    def on_start(self, cmd: Command):
+    async def on_start(self, cmd: Command):
         rich.print(f"[blue bold]Completed command {cmd.name}[/]")
 
-    def on_recv(self, _: Command, output: str):
+    async def on_recv(self, _: Command, output: str):
         rich.print(output)
 
-    def on_term(self, cmd: Command, exit_code: int):
+    async def on_term(self, cmd: Command, exit_code: int):
         """Callback function for when a command receives output"""
         if cmd.status == CommandStatus.SUCCESS:
             rich.print(f"[green bold]Command {cmd.name} finished[/]")
@@ -146,13 +147,13 @@ class CLICommandCBOnComp:
 
 
 class CLICommandCBOnRecv:
-    def on_start(self, cmd: Command):
+    async def on_start(self, cmd: Command):
         rich.print(f"[blue bold]{cmd.name}: Started[/]")
 
-    def on_recv(self, cmd: Command, output: str):
+    async def on_recv(self, cmd: Command, output: str):
         rich.print(f"{cmd.name}: {output}")
 
-    def on_term(self, cmd: Command, exit_code: int):
+    async def on_term(self, cmd: Command, exit_code: int):
         """Callback function for when a command receives output"""
         if cmd.status == CommandStatus.SUCCESS:
             rich.print(f"[green bold]{cmd.name}: Finished[/]")
@@ -286,15 +287,18 @@ def run(
         raise typer.Exit(0)
 
     for grp in master_groups:
+        # Run the async function with Trio's event loop
         if style == ProcessingStrategy.ON_COMP:
-            exit_code = grp.run(style, CLICommandCBOnComp())
+            trio.run(grp.run, style, CLICommandCBOnComp())
         elif style == ProcessingStrategy.ON_RECV:
-            exit_code = grp.run(style, CLICommandCBOnRecv())
+            trio.run(grp.run, style, CLICommandCBOnRecv())
         else:
             raise typer.BadParameter("Invalid processing strategy")  # pragma: no cover
-        if exit_code != 0 and not grp.cont_on_fail:
-            break
 
+        if grp.status != CommandStatus.SUCCESS:
+            exit_code = 1
+            if not grp.cont_on_fail:
+                break
     # Summarise the results
     console = rich.console.Console()
     res_tbl = build_results_tbl()
@@ -311,6 +315,7 @@ def run(
     console.print(res_tbl)
     end_style = "[green bold]" if exit_code == 0 else "[red bold]"
     rich.print(f"\n{end_style}Total elapsed time: {format_elapsed_time(time.perf_counter() - st_all)}[/]")
+
     raise typer.Exit(exit_code)
 
 
