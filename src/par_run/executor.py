@@ -28,10 +28,11 @@ class CommandStatus(enum.Enum):
     RUNNING = "Running"
     SUCCESS = "Success"
     FAILURE = "Failure"
+    TIMEOUT = "Timeout"
 
     def completed(self) -> bool:
         """Return True if the command has completed."""
-        return self in [CommandStatus.SUCCESS, CommandStatus.FAILURE]
+        return self in [CommandStatus.SUCCESS, CommandStatus.FAILURE, CommandStatus.TIMEOUT]
 
 
 class Command(BaseModel):
@@ -73,6 +74,13 @@ class Command(BaseModel):
         else:
             self.status = CommandStatus.FAILURE
 
+    def set_timeout(self) -> None:
+        """Set the command status to timeout."""
+        self.status = CommandStatus.TIMEOUT
+        if self.start_time:
+            self.elapsed = time.perf_counter() - self.start_time
+        self.ret_code = 999
+
     def set_running(self) -> None:
         """Set the command status to running."""
         self.start_time = time.perf_counter()
@@ -92,7 +100,6 @@ class CommandGroup(BaseModel):
     desc: Optional[str] = None
     cmds: OrderedDict[str, Command] = Field(default_factory=OrderedDict)
     timeout: int = Field(default=30)
-    retries: int = Field(default=3)
     cont_on_fail: bool = Field(default=False)
     serial: bool = Field(default=False)
     status: CommandStatus = CommandStatus.NOT_STARTED
@@ -104,7 +111,26 @@ class CommandGroup(BaseModel):
         else:
             self.status = CommandStatus.FAILURE
 
-    async def run(self, strategy: ProcessingStrategy, callbacks: CommandCB) -> None:
+    async def run_serial(self, strategy: ProcessingStrategy, callbacks: CommandCB) -> None:
+        try:
+            for ix in range(len(self.cmds.values())):
+                cmd = list(self.cmds.values())[ix]
+                cmd.set_running()
+                await self._run_command(cmd, strategy, callbacks)
+                if cmd.status != CommandStatus.SUCCESS and not self.cont_on_fail:
+                    # Fail all remaining cmds
+                    for jx in range(ix + 1, len(self.cmds.values())):
+                        cmd = list(self.cmds.values())[jx]
+                        cmd.set_ret_code(999)
+                        await callbacks.on_term(cmd, 999)
+                    self.update_status(self.cmds)
+                    break
+        except Exception as _:
+            self.status = CommandStatus.FAILURE
+        else:
+            self.update_status(self.cmds)
+
+    async def run_parallel(self, strategy: ProcessingStrategy, callbacks: CommandCB) -> None:
         try:
             async with anyio.create_task_group() as nursery:
                 for cmd in self.cmds.values():
@@ -114,6 +140,12 @@ class CommandGroup(BaseModel):
             self.status = CommandStatus.FAILURE
         else:
             self.update_status(self.cmds)
+
+    async def run(self, strategy: ProcessingStrategy, callbacks: CommandCB) -> None:
+        if self.serial:
+            await self.run_serial(strategy, callbacks)
+        else:
+            await self.run_parallel(strategy, callbacks)
 
     async def _proces_stdxx_line(
         self, cmd: Command, line: str, strategy: ProcessingStrategy, callbacks: CommandCB
@@ -145,7 +177,7 @@ class CommandGroup(BaseModel):
                 await self._proces_stdxx_line(cmd, line, strategy, callbacks)
 
         if incomplete_line:
-            await self._proces_stdxx_line(cmd, incomplete_line, strategy, callbacks)
+            await self._proces_stdxx_line(cmd, incomplete_line, strategy, callbacks)  # pragma: no cover
 
         if strategy == ProcessingStrategy.ON_COMP:
             await callbacks.on_start(cmd)
@@ -159,15 +191,22 @@ class CommandGroup(BaseModel):
             env.update(cmd.setenv)
 
         # Running the command asynchronously and capturing the output
-        async with (
-            await anyio.open_process(
-                command=cmd.cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-            ) as process,
-            anyio.create_task_group() as tg,
-        ):
-            if process.stdout:
-                tg.start_soon(self._process_stdxxx, cmd, strategy, process.stdout, callbacks)
-            await process.wait()
+        try:
+            with anyio.fail_after(self.timeout):
+                async with (
+                    await anyio.open_process(
+                        command=cmd.cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                    ) as process,
+                    anyio.create_task_group() as tg,
+                ):
+                    if process.stdout:
+                        tg.start_soon(self._process_stdxxx, cmd, strategy, process.stdout, callbacks)
+                    await process.wait()
+        except TimeoutError:
+            cmd.set_timeout()
+            await callbacks.on_term(cmd, 999)
+            return 999
+        else:
             exit_code = cast(int, process.returncode)
             cmd.set_ret_code(exit_code)
             await callbacks.on_term(cmd, exit_code)
@@ -234,17 +273,15 @@ def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
     command_groups = []
     for group_data in cmd_groups_data.get("groups", []):
         (group_name,) = _validate_mandatory_keys(group_data, ["name"], "top level par-run group")
-        group_desc, group_timeout, group_retries = _get_optional_keys(
+        group_desc, group_timeout = _get_optional_keys(
             group_data,
-            ["desc", "timeout", "retries"],
+            ["desc", "timeout"],
             default=None,
         )
         (group_cont_on_fail, group_serial) = _get_optional_keys(group_data, ["cont_on_fail", "serial"], default=False)
 
         if not group_timeout:
             group_timeout = 30
-        if not group_retries:
-            group_retries = 3
         group_cont_on_fail = bool(group_cont_on_fail and group_cont_on_fail is True)
         group_serial = bool(group_serial and group_serial is True)
 
@@ -259,7 +296,6 @@ def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
             desc=group_desc,
             cmds=commands,
             timeout=group_timeout,
-            retries=group_retries,
             cont_on_fail=group_cont_on_fail,
             serial=group_serial,
         )

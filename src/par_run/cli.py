@@ -4,7 +4,7 @@ import contextlib
 import enum
 from collections import OrderedDict
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
 import anyio
 import rich
@@ -185,9 +185,7 @@ def format_elapsed_time(seconds: float) -> str:
 def show_commands(groups: list[CommandGroup]) -> None:
     for grp in groups:
         rich.print(f"[blue bold]Group: {grp.name}[/]")
-        rich.print(
-            f"Params: cont_on_fail={grp.cont_on_fail}, serial={grp.serial}, timeout={grp.timeout}, retries={grp.retries}"
-        )
+        rich.print(f"Params: cont_on_fail={grp.cont_on_fail}, serial={grp.serial}, timeout={grp.timeout}")
         for cmd in grp.cmds.values():
             rich.print(f"[green bold]{cmd.name}[/]: {cmd.cmd}")
 
@@ -240,6 +238,9 @@ def add_command_row(tbl: rich.table.Table, cmd: Command, group_name: str) -> ric
     elif cmd.status == CommandStatus.FAILURE:
         cmd_status = "❌"
         row_style = "red"
+    elif cmd.status == CommandStatus.TIMEOUT:
+        cmd_status = "⏰"
+        row_style = "orange1"
     else:
         cmd_status = "⏳"
         row_style = "yellow"
@@ -262,15 +263,22 @@ show_default = typer.Option(help="Show available groups and commands", default=F
 pyproj_default = typer.Option(help="The default toml file to use", default=Path("pyproject.toml"))
 groups_default = typer.Option(help="Run a specific group of commands, comma spearated", default=None)
 cmds_default = typer.Option(help="Run specific commands, comma separated", default=None)
+backend_default = typer.Option(help="The backend to use", default="trio")
+
+backend_options: dict[str, Any] = {
+    "trio": {},
+    "asyncio": {"use_uvloop": True},
+}
 
 
 @cli_app.command()
-def run(
+def run(  # noqa: PLR0913
     style: Annotated[ProcessingStrategy, typer.Option] = style_default,
     show: Annotated[bool, typer.Option] = show_default,
     file: Annotated[Path, typer.Option] = pyproj_default,
     groups: Annotated[Optional[str], typer.Option] = groups_default,
     cmds: Annotated[Optional[str], typer.Option] = cmds_default,
+    backend: Annotated[str, typer.Option] = backend_default,
 ) -> None:
     """Run commands in parallel"""
     # Overall exit code, need to track all command exit codes to update this
@@ -290,12 +298,11 @@ def run(
     for grp in master_groups:
         # Run the async function with Trio's event loop
         if style == ProcessingStrategy.ON_COMP:
-            anyio.run(grp.run, style, CLICommandCBOnComp())
+            anyio.run(grp.run, style, CLICommandCBOnComp(), backend=backend, backend_options=backend_options[backend])
         elif style == ProcessingStrategy.ON_RECV:
-            anyio.run(grp.run, style, CLICommandCBOnRecv())
+            anyio.run(grp.run, style, CLICommandCBOnRecv(), backend=backend, backend_options=backend_options[backend])
         else:
             raise typer.BadParameter("Invalid processing strategy")  # pragma: no cover
-
         if grp.status != CommandStatus.SUCCESS:
             exit_code = 1
             if not grp.cont_on_fail:
@@ -316,7 +323,6 @@ def run(
     console.print(res_tbl)
     end_style = "[green bold]" if exit_code == 0 else "[red bold]"
     rich.print(f"\n{end_style}Total elapsed time: {format_elapsed_time(time.perf_counter() - st_all)}[/]")
-
     raise typer.Exit(exit_code)
 
 

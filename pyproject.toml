@@ -23,7 +23,7 @@ dependencies = [
     "typer>=0.9.0",
     "rich>=13.0.0",
     "exceptiongroup>=1.2.1",
-    "anyio>=4.3.0",
+    "anyio[trio]>=4.3.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.9"
@@ -51,7 +51,6 @@ build-backend = "hatchling.build"
 [tool.rye]
 managed = true
 dev-dependencies = [
-    "anyio[trio]>=4.3.0",
     "bump-my-version>=0.19.3",
     "httpx>=0.27.0",
     "ipython>=8.18.1",
@@ -153,7 +152,6 @@ desc = "par-run from pyproject.toml"
 name = "Formatting"
 desc = "Code formatting commands."
 timeout = 5
-retries = 3 
 cont_on_fail = true # default is false
 serial = false # default is false
 
@@ -172,7 +170,6 @@ serial = false # default is false
 name = "Quality"
 desc = "Code Quality Tools. No code mutation"
 timeout = 5
-retries = 3
 cont_on_fail = true # default is false
 
   [[tool.par-run.groups.commands]]
@@ -195,7 +192,6 @@ cont_on_fail = true # default is false
 name = "ENV"
 desc = "Code Quality Tools. No code mutation"
 timeout = 5
-retries = 3
 cont_on_fail = true # default is false
 
 
@@ -213,8 +209,7 @@ cont_on_fail = true # default is false
 [[tool.par-run.groups]]
 name = "Serial"
 desc = "Must run serially"
-timeout = 5
-retries = 3
+timeout = 3
 cont_on_fail = false # default is false
 serial = true
 

@@ -72,8 +72,8 @@ class TestCommandCB:
 
 
 def test_command_group(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
-    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'")
+    command1 = Command(name="test1", cmd="echo 'Hello, World!'", passenv=["PATH"])
+    command2 = Command(name="test2", cmd="echo 'World, Hey!'", setenv={"TEST": "test"})
     commands = OrderedDict()
     commands[command1.name] = command1
     commands[command2.name] = command2
@@ -93,6 +93,27 @@ def test_command_group(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, A
     commands[command2.name] = command2
     group = CommandGroup(name="test_group", cmds=commands)
     anyio.run(group.run, ProcessingStrategy.ON_RECV, TestCommandCB())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+
+
+@pytest.fixture(
+    params=[
+        pytest.param(("asyncio", {"use_uvloop": True}), id="asyncio+uvloop"),
+        pytest.param(("asyncio", {"use_uvloop": False}), id="asyncio"),
+    ]
+)
+def test_command_group_timeout(request) -> None:  # noqa: ARG001, ANN001
+    anyio_backend = request.param  # noqa: F841
+    command1 = Command(name="test1", cmd="echo 'Hello, World!' && sleep 2 && exit 0", passenv=["PATH"])
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    group = CommandGroup(name="test_group", cmds=commands, timeout=1)
+    anyio.run(group.run, ProcessingStrategy.ON_COMP, TestCommandCB())
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
@@ -259,7 +280,6 @@ def test_read_commands_toml(filename: str) -> None:
         assert isinstance(group.desc, str) or group.desc is None
         assert isinstance(group.cmds, OrderedDict)
         assert isinstance(group.timeout, int)
-        assert isinstance(group.retries, int)
         assert isinstance(group.cont_on_fail, bool)
         assert isinstance(group.serial, bool)
 
@@ -281,7 +301,6 @@ def test_read_commands_toml_missing_section(tmp_path: Path) -> None:
     name = "Test Group"
     desc = "Test description"
     timeout = 30
-    retries = 3
     cont_on_fail = false
     serial = false
 
