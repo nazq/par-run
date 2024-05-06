@@ -18,13 +18,13 @@ cli_app = typer.Typer()
 
 
 # Web only functions
-def clean_up():
+def clean_up() -> None:
     """Clean up by removing the PID file."""
     Path(PID_FILE).unlink()
     typer.echo("Cleaned up PID file.")
 
 
-def start_web_server(port: int):
+def start_web_server(port: int) -> None:
     """Start the web server"""
     if Path(PID_FILE).is_file():
         typer.echo("UVicorn server is already running.")
@@ -50,6 +50,7 @@ def start_web_server(port: int):
             test_port = get_process_port(process.pid)
             if port == test_port:
                 typer.echo(f"UVicorn server is running on port {port} in {(time.time_ns() - start_time)/10**6:.2f} ms.")
+                typer.echo(f"Server running at http://localhost:{port}/")
                 break
             time.sleep(0.1)  # Poll every 0.1 seconds
 
@@ -58,7 +59,7 @@ def start_web_server(port: int):
             typer.echo("run 'par-run web status' to check the status.")
 
 
-def stop_web_server():
+def stop_web_server() -> None:
     """Stop the UVicorn server by reading its PID from the PID file and sending a termination signal."""
     if not Path(PID_FILE).is_file():
         typer.echo("UVicorn server is not running.")
@@ -82,7 +83,7 @@ def get_process_port(pid: int) -> Optional[int]:
     return None
 
 
-def list_uvicorn_processes():
+def list_uvicorn_processes() -> None:
     """Check for other UVicorn processes and list them"""
     uvicorn_processes = []
     with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -99,7 +100,7 @@ def list_uvicorn_processes():
         typer.echo("No other UVicorn processes found.")
 
 
-def get_web_server_status():
+def get_web_server_status() -> None:
     """Get the status of the UVicorn server by reading its PID from the PID file."""
     if not Path(PID_FILE).is_file():
         typer.echo("No pid file found. Server likely not running.")
@@ -127,18 +128,18 @@ class WebCommand(enum.Enum):
     RESTART = "restart"
     STATUS = "status"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.value
 
 
 class CLICommandCBOnComp:
-    async def on_start(self, cmd: Command):
+    async def on_start(self, cmd: Command) -> None:
         rich.print(f"[blue bold]Completed command {cmd.name}[/]")
 
-    async def on_recv(self, _: Command, output: str):
+    async def on_recv(self, _: Command, output: str) -> None:
         rich.print(output)
 
-    async def on_term(self, cmd: Command, exit_code: int):
+    async def on_term(self, cmd: Command, exit_code: int) -> None:
         """Callback function for when a command receives output"""
         if cmd.status == CommandStatus.SUCCESS:
             rich.print(f"[green bold]Command {cmd.name} finished[/]")
@@ -147,13 +148,13 @@ class CLICommandCBOnComp:
 
 
 class CLICommandCBOnRecv:
-    async def on_start(self, cmd: Command):
+    async def on_start(self, cmd: Command) -> None:
         rich.print(f"[blue bold]{cmd.name}: Started[/]")
 
-    async def on_recv(self, cmd: Command, output: str):
+    async def on_recv(self, cmd: Command, output: str) -> None:
         rich.print(f"{cmd.name}: {output}")
 
-    async def on_term(self, cmd: Command, exit_code: int):
+    async def on_term(self, cmd: Command, exit_code: int) -> None:
         """Callback function for when a command receives output"""
         if cmd.status == CommandStatus.SUCCESS:
             rich.print(f"[green bold]{cmd.name}: Finished[/]")
@@ -181,7 +182,7 @@ def format_elapsed_time(seconds: float) -> str:
     return f"{hours:02}:{minutes:02}:{seconds:06.3f}"
 
 
-def show_commands(groups: list[CommandGroup]):
+def show_commands(groups: list[CommandGroup]) -> None:
     for grp in groups:
         rich.print(f"[blue bold]Group: {grp.name}[/]")
         rich.print(
@@ -270,7 +271,7 @@ def run(
     file: Annotated[Path, typer.Option] = pyproj_default,
     groups: Annotated[Optional[str], typer.Option] = groups_default,
     cmds: Annotated[Optional[str], typer.Option] = cmds_default,
-):
+) -> None:
     """Run commands in parallel"""
     # Overall exit code, need to track all command exit codes to update this
     exit_code = 0
@@ -342,7 +343,7 @@ try:
     def web(
         command: WebCommand = command_default,
         port: int = port_default,
-    ):
+    ) -> None:
         """Run the web server"""
         if command == WebCommand.START:
             start_web_server(port)

@@ -63,7 +63,7 @@ class Command(BaseModel):
         """Clear the unflushed output."""
         self.unflushed.clear()
 
-    def set_ret_code(self, ret_code: int):
+    def set_ret_code(self, ret_code: int) -> None:
         """Set the return code and status of the command."""
         if self.start_time:
             self.elapsed = time.perf_counter() - self.start_time
@@ -73,7 +73,7 @@ class Command(BaseModel):
         else:
             self.status = CommandStatus.FAILURE
 
-    def set_running(self):
+    def set_running(self) -> None:
         """Set the command status to running."""
         self.start_time = time.perf_counter()
         self.status = CommandStatus.RUNNING
@@ -97,14 +97,14 @@ class CommandGroup(BaseModel):
     serial: bool = Field(default=False)
     status: CommandStatus = CommandStatus.NOT_STARTED
 
-    def update_status(self, cmds: OrderedDict[str, Command]):
+    def update_status(self, cmds: OrderedDict[str, Command]) -> None:
         """Update the status of the command group."""
         if all(cmd.status == CommandStatus.SUCCESS for cmd in cmds.values()):
             self.status = CommandStatus.SUCCESS
         else:
             self.status = CommandStatus.FAILURE
 
-    async def run(self, strategy: ProcessingStrategy, callbacks: CommandCB):
+    async def run(self, strategy: ProcessingStrategy, callbacks: CommandCB) -> None:
         try:
             async with anyio.create_task_group() as nursery:
                 for cmd in self.cmds.values():
@@ -115,7 +115,9 @@ class CommandGroup(BaseModel):
         else:
             self.update_status(self.cmds)
 
-    async def _proces_stdxx_line(self, cmd: Command, line: str, strategy: ProcessingStrategy, callbacks: CommandCB):
+    async def _proces_stdxx_line(
+        self, cmd: Command, line: str, strategy: ProcessingStrategy, callbacks: CommandCB
+    ) -> None:
         if strategy == ProcessingStrategy.ON_RECV:
             await callbacks.on_recv(cmd, line)
         elif strategy == ProcessingStrategy.ON_COMP:
@@ -124,7 +126,10 @@ class CommandGroup(BaseModel):
 
     async def _process_stdxxx(
         self, cmd: Command, strategy: ProcessingStrategy, stream: AsyncIterable[bytes], callbacks: CommandCB
-    ):
+    ) -> None:
+        if strategy == ProcessingStrategy.ON_RECV:
+            await callbacks.on_start(cmd)
+
         incomplete_line = ""
 
         async for chunk in stream:
@@ -141,6 +146,12 @@ class CommandGroup(BaseModel):
 
         if incomplete_line:
             await self._proces_stdxx_line(cmd, incomplete_line, strategy, callbacks)
+
+        if strategy == ProcessingStrategy.ON_COMP:
+            await callbacks.on_start(cmd)
+            for _ix, line in enumerate(cmd.unflushed):
+                await callbacks.on_recv(cmd, line)
+            cmd.clear_unflushed()
 
     async def _run_command(self, cmd: Command, strategy: ProcessingStrategy, callbacks: CommandCB) -> int:
         env = os.environ.copy()
@@ -181,7 +192,7 @@ def _validate_mandatory_keys(data: tomlkit.items.Table, keys: list[str], context
     return tuple(vals)
 
 
-def _get_optional_keys(data: tomlkit.items.Table, keys: list[str], default=None) -> tuple[Optional[Any], ...]:
+def _get_optional_keys(data: tomlkit.items.Table, keys: list[str], default: Any = None) -> tuple[Optional[Any], ...]:  # noqa: ANN001, ANN401
     """Get Optional keys or default.
 
     Args:

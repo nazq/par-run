@@ -1,8 +1,9 @@
 from collections import OrderedDict
+from pathlib import Path
 
+import anyio
 import pytest
 import tomlkit
-import anyio
 
 from par_run.executor import (
     Command,
@@ -13,9 +14,10 @@ from par_run.executor import (
     _validate_mandatory_keys,
     read_commands_toml,
 )
+from py_tests.conftest import AnyIOBackendT
 
 
-def test_command_incr_line_count():
+def test_command_incr_line_count() -> None:
     command = Command(name="test", cmd="echo 'Hello, World!'")
     assert command.num_non_empty_lines == 0
 
@@ -26,7 +28,7 @@ def test_command_incr_line_count():
     assert command.num_non_empty_lines == 1
 
 
-def test_command_append_unflushed():
+def test_command_append_unflushed() -> None:
     command = Command(name="test", cmd="echo 'Hello, World!'")
     assert command.unflushed == []
 
@@ -37,25 +39,25 @@ def test_command_append_unflushed():
     assert command.unflushed == ["Hello, World!", ""]
 
 
-def test_command_set_running():
+def test_command_set_running() -> None:
     command = Command(name="test", cmd="echo 'Hello, World!'")
     assert command.status == CommandStatus.NOT_STARTED
 
     command.set_running()
-    assert command.status == CommandStatus.RUNNING
+    assert command.status == CommandStatus.RUNNING  # type: ignore
 
 
 class TestCommandCB:
-    async def on_start(self, cmd: Command):
+    async def on_start(self, cmd: Command) -> None:
         assert cmd
         assert cmd.name.startswith("test")
 
-    async def on_recv(self, cmd: Command, output: str):
+    async def on_recv(self, cmd: Command, output: str) -> None:
         assert cmd
         assert cmd.name.startswith("test")
-        assert output
+        assert output is not None
 
-    async def on_term(self, cmd: Command, exit_code: int):
+    async def on_term(self, cmd: Command, exit_code: int) -> None:
         assert cmd
         assert cmd.name.startswith("test")
         assert isinstance(exit_code, int)
@@ -69,7 +71,7 @@ class TestCommandCB:
             assert cmd.ret_code != 0
 
 
-def test_command_group():
+def test_command_group(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
     command1 = Command(name="test1", cmd="echo 'Hello, World!'")
     command2 = Command(name="test2", cmd="echo 'World, Hey!'")
     commands = OrderedDict()
@@ -80,7 +82,7 @@ def test_command_group():
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    #assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
     assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
 
@@ -94,12 +96,12 @@ def test_command_group():
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    #assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
     assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
 
 
-def test_command_group_part_fail():
+def test_command_group_part_fail(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
     command1 = Command(name="test1", cmd="echo 'Hello, World!'")
     command2 = Command(name="test2", cmd="echo 'World, Hey!'; exit 1")
     commands = OrderedDict()
@@ -110,7 +112,7 @@ def test_command_group_part_fail():
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    #assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
     assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
     assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
 
@@ -124,12 +126,12 @@ def test_command_group_part_fail():
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    #assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
     assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
     assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
 
 
-async def test_command_group_async():
+async def test_command_group_async(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
     command1 = Command(name="test1", cmd="echo 'Hello, World!'")
     command2 = Command(name="test2", cmd="echo 'World, Hey!'")
     commands = OrderedDict()
@@ -140,7 +142,7 @@ async def test_command_group_async():
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    #assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
     assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
 
@@ -154,12 +156,12 @@ async def test_command_group_async():
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    #assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
     assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
 
 
-async def test_command_group_async_part_fail():
+async def test_command_group_async_part_fail(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
     command1 = Command(name="test1", cmd="echo 'Hello, World!'")
     command2 = Command(name="test2", cmd="echo 'World, Hey!'; exit 1")
     commands = OrderedDict()
@@ -170,7 +172,7 @@ async def test_command_group_async_part_fail():
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    #assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
     assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
     assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
     assert group.status == CommandStatus.FAILURE
@@ -182,16 +184,16 @@ async def test_command_group_async_part_fail():
     commands[command2.name] = command2
     group = CommandGroup(name="test_group", cmds=commands)
     await group.run(ProcessingStrategy.ON_RECV, TestCommandCB())
-    #assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
     assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    #assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
     assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
     assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
     assert group.status == CommandStatus.FAILURE
 
 
-def test_validate_mandatory_keys():
+def test_validate_mandatory_keys() -> None:
     data = tomlkit.table()
     data["key1"] = "value1"
     data["key2"] = "value2"
@@ -204,7 +206,7 @@ def test_validate_mandatory_keys():
     assert result == ("value1", "value2", "value3")
 
 
-def test_validate_mandatory_keys_missing_key():
+def test_validate_mandatory_keys_missing_key() -> None:
     data = tomlkit.table()
     data["key1"] = "value1"
     data["key3"] = "value3"
@@ -218,36 +220,36 @@ def test_validate_mandatory_keys_missing_key():
     assert str(exc_info.value) == "key2 is mandatory, not found in test_context"
 
 
-def test__get_optional_keys():
+def test__get_optional_keys() -> None:
     data = tomlkit.table()
     data["key1"] = "value1"
     data["key2"] = "value2"
     data["key3"] = "value3"
 
     keys = ["key1", "key2", "key3"]
-    expected_result = ("value1", "value2", "value3")
-    assert _get_optional_keys(data, keys) == expected_result
+    expected_result1 = ("value1", "value2", "value3")
+    assert _get_optional_keys(data, keys) == expected_result1
 
     keys = ["key1", "key2", "key4"]
-    expected_result = ("value1", "value2", None)
-    assert _get_optional_keys(data, keys) == expected_result
+    expected_result2 = ("value1", "value2", None)
+    assert _get_optional_keys(data, keys) == expected_result2
 
     keys = ["key4", "key5", "key6"]
-    expected_result = (None, None, None)
-    assert _get_optional_keys(data, keys) == expected_result
+    expected_result3 = (None, None, None)
+    assert _get_optional_keys(data, keys) == expected_result3
 
     keys = []
-    expected_result = ()
-    assert _get_optional_keys(data, keys) == expected_result
+    expected_result4 = ()
+    assert _get_optional_keys(data, keys) == expected_result4
 
     data = tomlkit.table()
     keys = ["key1", "key2", "key3"]
-    expected_result = (None, None, None)
-    assert _get_optional_keys(data, keys) == expected_result
+    expected_result5 = (None, None, None)
+    assert _get_optional_keys(data, keys) == expected_result5
 
 
 @pytest.mark.parametrize("filename", ["pyproject.toml", "commands.toml"])
-def test_read_commands_toml(filename):
+def test_read_commands_toml(filename: str) -> None:
     command_groups = read_commands_toml(filename)
     assert isinstance(command_groups, list)
     assert len(command_groups) > 0
@@ -272,7 +274,7 @@ def test_read_commands_toml(filename):
         read_commands_toml(filename)
 
 
-def test_read_commands_toml_missing_section(tmp_path):
+def test_read_commands_toml_missing_section(tmp_path: Path) -> None:
     # Create a valid TOML file without the par-run section
     toml_content = """
     [command_group]

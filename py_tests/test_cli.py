@@ -1,7 +1,10 @@
 import itertools
+from collections import OrderedDict
+from pathlib import Path
 
 import psutil
 import pytest
+from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
 from par_run.cli import (
@@ -25,29 +28,34 @@ runner = CliRunner()
 
 
 @pytest.fixture()
-def mock_command_group():
+def mock_command_group() -> CommandGroup:
     command1 = Command(name="cmd1", cmd="echo 'Hello, World!'")
     command2 = Command(name="cmd2", cmd="echo 'Goodbye, World!'")
-    commands = {"cmd1": command1, "cmd2": command2}
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    commands[command2.name] = command2
     return CommandGroup(name="group1", cmds=commands)
 
 
 @pytest.fixture()
-def mock_command_group_part_fail():
+def mock_command_group_part_fail() -> CommandGroup:
     command1 = Command(name="cmd1", cmd="echo 'Hello, World!'")
     command2 = Command(name="cmd2", cmd="exit 1")
-    commands = {"cmd1": command1, "cmd2": command2}
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    commands[command2.name] = command2
     return CommandGroup(name="group1", cmds=commands)
 
 
-def test_run(mocker, mock_command_group):
+def test_run(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
     mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--show"])
     assert result.exit_code == 0
 
 
-async def test_CLICommandCB_on_start(mocker):
+@pytest.mark.anyio
+async def test_CLICommandCB_on_start(mocker: MockerFixture) -> None:
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
@@ -55,7 +63,8 @@ async def test_CLICommandCB_on_start(mocker):
     mock_rich_print.assert_called_once()
 
 
-async def test_CLICommandCB_on_recv(mocker):
+@pytest.mark.anyio
+async def test_CLICommandCB_on_recv(mocker: MockerFixture) -> None:
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
@@ -63,8 +72,9 @@ async def test_CLICommandCB_on_recv(mocker):
     mock_rich_print.assert_called_once_with("Hello, World!")
 
 
+@pytest.mark.anyio
 @pytest.mark.parametrize("status", [CommandStatus.SUCCESS, CommandStatus.FAILURE])
-async def test_CLICommandCB_on_term(mocker, status):
+async def test_CLICommandCB_on_term(mocker: MockerFixture, status: CommandStatus) -> None:
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
@@ -73,7 +83,7 @@ async def test_CLICommandCB_on_term(mocker, status):
     assert mock_rich_print.called
 
 
-def test_clean_up(mocker, tmp_path):
+def test_clean_up(mocker: MockerFixture, tmp_path: Path) -> None:
     pid_file = tmp_path / ".par-run.uvicorn.pid"
     pid_file.write_text("1234")
     mocker.patch("par_run.cli.PID_FILE", str(pid_file))
@@ -82,7 +92,7 @@ def test_clean_up(mocker, tmp_path):
 
 
 @pytest.mark.parametrize("command", ["start", "stop", "restart", "status"])
-def test_web(mocker, command):
+def test_web(mocker: MockerFixture, command: str) -> None:
     mocker.patch("par_run.cli.start_web_server")
     mocker.patch("par_run.cli.stop_web_server")
     mocker.patch("par_run.cli.get_web_server_status")
@@ -90,7 +100,7 @@ def test_web(mocker, command):
     assert result.exit_code == 0
 
 
-def test_web_fail(mocker):
+def test_web_fail(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.start_web_server")
     mocker.patch("par_run.cli.stop_web_server")
     mocker.patch("par_run.cli.get_web_server_status")
@@ -98,7 +108,7 @@ def test_web_fail(mocker):
     assert result.exit_code != 0
 
 
-def test_start_web_server(mocker, tmp_path):
+def test_start_web_server(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch("par_run.cli.subprocess.Popen")
     mocker.patch("par_run.cli.os.path.isfile", return_value=False)
     mocker.patch("par_run.cli.time.time_ns", side_effect=[0, 3 * 10**9 + 1])  # Simulate 3 seconds passing
@@ -108,7 +118,7 @@ def test_start_web_server(mocker, tmp_path):
     assert pid_file.exists()
 
 
-def test_start_web_server_running(mocker, tmp_path):
+def test_start_web_server_running(mocker: MockerFixture, tmp_path: Path) -> None:
     # Setup: Mock subprocess.Popen to simulate the server process
     mock_process = mocker.MagicMock()
     mocker.patch("par_run.cli.subprocess.Popen", return_value=mock_process)
@@ -146,7 +156,7 @@ def test_start_web_server_running(mocker, tmp_path):
     assert pid_file.exists()
 
 
-def test_stop_web_server(mocker, tmp_path):
+def test_stop_web_server(mocker: MockerFixture, tmp_path: Path) -> None:
     pid_file = tmp_path / ".par-run.uvicorn.pid"
     pid_file.write_text("1234")
     mocker.patch("par_run.cli.PID_FILE", str(pid_file))
@@ -155,14 +165,14 @@ def test_stop_web_server(mocker, tmp_path):
     assert not pid_file.exists()
 
 
-def test_stop_web_server_no_pid_file(mocker, tmp_path):
+def test_stop_web_server_no_pid_file(mocker: MockerFixture, tmp_path: Path) -> None:
     pid_file = tmp_path / ".par-run.uvicorn.pid"
     mocker.patch("par_run.cli.PID_FILE", str(pid_file))
     mocker.patch("par_run.cli.os.kill")
     stop_web_server()
 
 
-def test_get_web_server_status(mocker, tmp_path):
+def test_get_web_server_status(mocker: MockerFixture, tmp_path: Path) -> None:
     pid_file = tmp_path / ".par-run.uvicorn.pid"
     mocker.patch("par_run.cli.PID_FILE", str(pid_file))
     mocker.patch("par_run.cli.typer.echo")
@@ -178,7 +188,7 @@ def test_get_web_server_status(mocker, tmp_path):
     get_web_server_status()
 
 
-def test_run_with_on_recv(mocker, mock_command_group):
+def test_run_with_on_recv(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
     read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--style", "recv"])
@@ -186,7 +196,7 @@ def test_run_with_on_recv(mocker, mock_command_group):
     read_mock.assert_called_once()
 
 
-def test_run_with_on_comp(mocker, mock_command_group):
+def test_run_with_on_comp(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
     read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--style", "comp"])
@@ -194,7 +204,7 @@ def test_run_with_on_comp(mocker, mock_command_group):
     read_mock.assert_called_once()
 
 
-def test_run_with_specific_groups(mocker, mock_command_group):
+def test_run_with_specific_groups(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
     read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--groups", "group1"])
@@ -202,7 +212,7 @@ def test_run_with_specific_groups(mocker, mock_command_group):
     read_mock.assert_called_once()
 
 
-def test_run_with_fails(mocker, mock_command_group_part_fail):
+def test_run_with_fails(mocker: MockerFixture, mock_command_group_part_fail: CommandGroup) -> None:
     read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group_part_fail])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run"])
@@ -210,7 +220,7 @@ def test_run_with_fails(mocker, mock_command_group_part_fail):
     read_mock.assert_called_once()
 
 
-def test_run_with_specific_cmds(mocker, mock_command_group):
+def test_run_with_specific_cmds(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
     mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--cmds", "cmd1"])
@@ -218,7 +228,7 @@ def test_run_with_specific_cmds(mocker, mock_command_group):
     # Add additional assertions to check if the command was filtered correctly
 
 
-def test_run_with_nonexistent_group(mocker, mock_command_group):
+def test_run_with_nonexistent_group(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
     mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--groups", "nonexistent"])
@@ -226,7 +236,7 @@ def test_run_with_nonexistent_group(mocker, mock_command_group):
     # Add assertion to ensure no commands are run and appropriate message is displayed
 
 
-def test_run_with_nonexistent_cmd(mocker, mock_command_group):
+def test_run_with_nonexistent_cmd(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
     mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--cmds", "nonexistent"])
@@ -234,7 +244,7 @@ def test_run_with_nonexistent_cmd(mocker, mock_command_group):
     # Add assertion to ensure no commands are run and appropriate message is displayed
 
 
-def test_start_web_server_already_running(mocker, tmp_path):
+def test_start_web_server_already_running(mocker: MockerFixture, tmp_path: Path) -> None:
     pid_file = tmp_path / ".par-run.uvicorn.pid"
     pid_file.write_text("1234")
     mocker.patch("par_run.cli.PID_FILE", str(pid_file))
@@ -243,7 +253,7 @@ def test_start_web_server_already_running(mocker, tmp_path):
         start_web_server(8000)
 
 
-def test_get_web_server_status_running(mocker, tmp_path):
+def test_get_web_server_status_running(mocker: MockerFixture, tmp_path: Path) -> None:
     pid_file = tmp_path / ".par-run.uvicorn.pid"
     pid_file.write_text("1234")
     mocker.patch("par_run.cli.PID_FILE", str(pid_file))
@@ -254,7 +264,7 @@ def test_get_web_server_status_running(mocker, tmp_path):
     # Add assertion to check the status message for a running server
 
 
-def test_get_web_server_status_not_running_pid_file_exists(mocker, tmp_path):
+def test_get_web_server_status_not_running_pid_file_exists(mocker: MockerFixture, tmp_path: Path) -> None:
     pid_file = tmp_path / ".par-run.uvicorn.pid"
     pid_file.write_text("1234")
     mocker.patch("par_run.cli.PID_FILE", str(pid_file))
@@ -264,7 +274,7 @@ def test_get_web_server_status_not_running_pid_file_exists(mocker, tmp_path):
     # Add assertion to check the status message and cleanup action when the server is not running but PID file exists
 
 
-def test_start_web_server_failure_to_start(mocker, tmp_path):
+def test_start_web_server_failure_to_start(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch("par_run.cli.subprocess.Popen", side_effect=Exception("Failed to start"))
     pid_file = tmp_path / ".par-run.uvicorn.pid"
     mocker.patch("par_run.cli.PID_FILE", str(pid_file))
@@ -273,7 +283,7 @@ def test_start_web_server_failure_to_start(mocker, tmp_path):
         start_web_server(8000)
 
 
-def test_stop_web_server_failure(mocker, tmp_path):
+def test_stop_web_server_failure(mocker: MockerFixture, tmp_path: Path) -> None:
     pid_file = tmp_path / ".par-run.uvicorn.pid"
     pid_file.write_text("1234")
     mocker.patch("par_run.cli.PID_FILE", str(pid_file))
@@ -283,7 +293,7 @@ def test_stop_web_server_failure(mocker, tmp_path):
         stop_web_server()
 
 
-def test_get_process_port(mocker):
+def test_get_process_port(mocker: MockerFixture) -> None:
     # Mock psutil.Process and its connections method
     mock_process = mocker.patch("par_run.cli.psutil.Process")
     mock_conn = mocker.MagicMock()
@@ -296,7 +306,7 @@ def test_get_process_port(mocker):
     assert port == run_port
 
 
-def test_get_process_port_no_connections(mocker):
+def test_get_process_port_no_connections(mocker: MockerFixture) -> None:
     # Mock psutil.Process to return no connections
     mock_process = mocker.patch("par_run.cli.psutil.Process")
     mock_process.return_value.connections.return_value = []
@@ -305,7 +315,7 @@ def test_get_process_port_no_connections(mocker):
     assert port is None
 
 
-def test_list_uvicorn_processes(mocker):
+def test_list_uvicorn_processes(mocker: MockerFixture) -> None:
     # Mock psutil.process_iter to yield mock processes
     mock_process_iter = mocker.patch("par_run.cli.psutil.process_iter")
     mock_process_uvicorn = mocker.MagicMock()
@@ -324,7 +334,7 @@ def test_list_uvicorn_processes(mocker):
     mock_echo.assert_any_call("PID: 1234, Name: uvicorn")
 
 
-def test_list_no_uvicorn_processes(mocker):
+def test_list_no_uvicorn_processes(mocker: MockerFixture) -> None:
     # Mock psutil.process_iter to yield no UVicorn processes
     mock_process_iter = mocker.patch("par_run.cli.psutil.process_iter")
     mock_process_other = mocker.MagicMock()
@@ -339,7 +349,7 @@ def test_list_no_uvicorn_processes(mocker):
     mock_echo.assert_any_call("No other UVicorn processes found.")
 
 
-def test_list_uvicorn_processes_with_exceptions(mocker):
+def test_list_uvicorn_processes_with_exceptions(mocker: MockerFixture) -> None:
     # Mock psutil.process_iter to yield processes that raise exceptions
     mock_process_iter = mocker.patch("par_run.cli.psutil.process_iter")
 
@@ -371,7 +381,7 @@ def test_list_uvicorn_processes_with_exceptions(mocker):
     # This can be inferred from the fact that the function executed to completion and made the expected call to mock_echo
 
 
-def test_get_web_server_status_running_no_port(mocker, tmp_path):
+def test_get_web_server_status_running_no_port(mocker: MockerFixture, tmp_path: Path) -> None:
     # Setup: Create a temporary PID file with a mock PID
     pid_file = tmp_path / ".par-run.uvicorn.pid"
     pid_file.write_text("1234")  # Example PID
@@ -393,7 +403,7 @@ def test_get_web_server_status_running_no_port(mocker, tmp_path):
     mock_echo.assert_any_call("UVicorn server is running with pid=1234, couldn't determine port.")
 
 
-def test_web_command_enum():
+def test_web_command_enum() -> None:
     from par_run.cli import WebCommand
 
     for cmd in WebCommand:
@@ -401,47 +411,51 @@ def test_web_command_enum():
         assert str(cmd) == cmd.value
 
 
-def test_command_cb_comp_success(mocker):
+@pytest.mark.anyio
+async def test_command_cb_comp_success(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
-    cb.on_start(command)
-    cb.on_recv(command, "Hello, World!")
+    await cb.on_start(command)
+    await cb.on_recv(command, "Hello, World!")
     command.status = CommandStatus.SUCCESS
-    cb.on_term(command, 0)
+    await cb.on_term(command, 0)
 
 
-def test_command_cb_comp_fail(mocker):
+@pytest.mark.anyio
+async def test_command_cb_comp_fail(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
-    cb.on_start(command)
-    cb.on_recv(command, "Hello, World!")
+    await cb.on_start(command)
+    await cb.on_recv(command, "Hello, World!")
     command.status = CommandStatus.FAILURE
-    cb.on_term(command, 1)
+    await cb.on_term(command, 1)
 
 
-def test_command_cb_recv_success(mocker):
+@pytest.mark.anyio
+async def test_command_cb_recv_success(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnRecv()
     command = Command(name="cmd1", cmd="echo 'Hello'")
-    cb.on_start(command)
-    cb.on_recv(command, "Hello, World!")
+    await cb.on_start(command)
+    await cb.on_recv(command, "Hello, World!")
     command.status = CommandStatus.SUCCESS
-    cb.on_term(command, 0)
+    await cb.on_term(command, 0)
 
 
-def test_command_cb_recv_fail(mocker):
+@pytest.mark.anyio
+async def test_command_cb_recv_fail(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnRecv()
     command = Command(name="cmd1", cmd="echo 'Hello'")
-    cb.on_start(command)
-    cb.on_recv(command, "Hello, World!")
+    await cb.on_start(command)
+    await cb.on_recv(command, "Hello, World!")
     command.status = CommandStatus.FAILURE
-    cb.on_term(command, 1)
+    await cb.on_term(command, 1)
 
 
-def test_results_table():
+def test_results_table() -> None:
     tbl = build_results_tbl()
     cols = ["Group", "Name", "Command", "Status", "Elapsed"]
     assert tbl is not None
@@ -456,21 +470,21 @@ def test_results_table():
     add_command_row(tbl, command, "group3")
 
 
-def test_fmt_group_name():
+def test_fmt_group_name() -> None:
     cmd_name = "group1"
-    cmd_grp = CommandGroup(name=cmd_name, cmds={})
+    cmd_grp = CommandGroup(name=cmd_name, cmds=OrderedDict())
     cmd_grp.status = CommandStatus.SUCCESS
     fmt_res = fmt_group_name(cmd_grp)
     assert cmd_name in fmt_res
     assert "[green]" in fmt_res
 
-    cmd_grp = CommandGroup(name=cmd_name, cmds={})
+    cmd_grp = CommandGroup(name=cmd_name, cmds=OrderedDict())
     cmd_grp.status = CommandStatus.FAILURE
     fmt_res = fmt_group_name(cmd_grp)
     assert cmd_name in fmt_res
     assert "[red]" in fmt_res
 
-    cmd_grp = CommandGroup(name=cmd_name, cmds={})
+    cmd_grp = CommandGroup(name=cmd_name, cmds=OrderedDict())
     cmd_grp.status = CommandStatus.NOT_STARTED
     fmt_res = fmt_group_name(cmd_grp)
     assert cmd_name in fmt_res

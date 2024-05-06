@@ -22,7 +22,6 @@ dependencies = [
     "tomlkit>=0.12.4",
     "typer>=0.9.0",
     "rich>=13.0.0",
-    "trio>=0.25.0",
     "exceptiongroup>=1.2.1",
     "anyio>=4.3.0",
 ]
@@ -42,7 +41,7 @@ web = [
     "uvicorn[standard]>=0.29.0",
     "jinja2>=3.0.0",
     "psutil>=5.9.0",
-    "hypercorn[trio]",
+    # "hypercorn[trio]",
 ]
 
 [build-system]
@@ -52,6 +51,7 @@ build-backend = "hatchling.build"
 [tool.rye]
 managed = true
 dev-dependencies = [
+    "anyio[trio]>=4.3.0",
     "bump-my-version>=0.19.3",
     "httpx>=0.27.0",
     "ipython>=8.18.1",
@@ -61,18 +61,22 @@ dev-dependencies = [
     "pytest-cov>=5.0.0",
     "pytest-mock>=3.14.0",
     "pytest-random-order>=1.1.1",
-    "pytest-trio>=0.8.0",
     "pytest-xdist>=3.5.0",
     "ruff>=0.3.4",
     "twine>=5.0.0",
     "types-toml>=0.10.8.20240310",
     "types-psutil>=5.9.5.20240316",
-    "pytest-asyncio>=0.23.6",
+    "types-requests>=2.31.0.20240406",
 ]
 
 [project.scripts]
 "par-run" = "par_run.cli:cli_app"
 
+[tool.mypy]
+ignore_missing_imports = true
+show_error_codes = true
+strict = true
+disallow_untyped_defs = true
 
 [tool.hatch.metadata]
 allow-direct-references = true
@@ -121,12 +125,12 @@ extend-select = [
     'ERA',
     'ARG',
     'PL',
-    #'ANN',
+    'ANN',
     'SIM',
     'PERF',
     'T20',
 ]
-extend-ignore = ["S101", "FA100"]
+extend-ignore = ["S101", "FA100", "ANN101"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["par_run"]
