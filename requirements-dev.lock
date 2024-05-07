@@ -12,10 +12,14 @@ annotated-types==0.6.0
     # via pydantic
 anyio==4.3.0
     # via httpx
+    # via par-run
     # via starlette
     # via watchfiles
 asttokens==2.4.1
     # via stack-data
+attrs==23.2.0
+    # via outcome
+    # via trio
 backports-tarfile==1.0.0
     # via jaraco-context
 bump-my-version==0.20.0
@@ -40,10 +44,12 @@ decorator==5.1.1
     # via ipython
 docutils==0.21.1
     # via readme-renderer
-exceptiongroup==1.2.0
+exceptiongroup==1.2.1
     # via anyio
     # via ipython
+    # via par-run
     # via pytest
+    # via trio
 execnet==2.1.1
     # via pytest-xdist
 executing==2.0.1
@@ -62,6 +68,7 @@ idna==3.7
     # via anyio
     # via httpx
     # via requests
+    # via trio
 importlib-metadata==7.1.0
     # via keyring
     # via twine
@@ -99,6 +106,8 @@ mypy-extensions==1.0.0
     # via mypy
 nh3==0.2.17
     # via readme-renderer
+outcome==1.3.0.post0
+    # via trio
 packaging==24.0
     # via pytest
 parso==0.8.4
@@ -136,13 +145,11 @@ pygments==2.17.2
     # via readme-renderer
     # via rich
 pytest==8.1.1
-    # via pytest-asyncio
     # via pytest-benchmark
     # via pytest-cov
     # via pytest-mock
     # via pytest-random-order
     # via pytest-xdist
-pytest-asyncio==0.23.6
 pytest-benchmark==4.0.0
 pytest-cov==5.0.0
 pytest-mock==3.14.0
@@ -182,6 +189,9 @@ six==1.16.0
 sniffio==1.3.1
     # via anyio
     # via httpx
+    # via trio
+sortedcontainers==2.4.0
+    # via trio
 stack-data==0.6.3
     # via ipython
 starlette==0.37.2
@@ -196,10 +206,13 @@ tomlkit==0.12.4
 traitlets==5.14.2
     # via ipython
     # via matplotlib-inline
+trio==0.25.0
+    # via anyio
 twine==5.0.0
 typer==0.12.3
     # via par-run
 types-psutil==5.9.5.20240316
+types-requests==2.31.0.20240406
 types-toml==0.10.8.20240310
 typing-extensions==4.11.0
     # via anyio
@@ -215,6 +228,7 @@ typing-extensions==4.11.0
 urllib3==2.2.1
     # via requests
     # via twine
+    # via types-requests
 uvicorn==0.29.0
     # via par-run
 uvloop==0.19.0

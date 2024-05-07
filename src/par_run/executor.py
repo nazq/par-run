@@ -1,25 +1,20 @@
 """Todo"""
 
-import asyncio
 import enum
-import multiprocessing as mp
 import os
-import queue
 import subprocess
 import time
 from collections import OrderedDict
-from concurrent.futures import Future, ProcessPoolExecutor
+from collections.abc import AsyncIterable
 from pathlib import Path
-from queue import Queue
-from typing import Any, Optional, Protocol, TypeVar, Union
+from typing import Any, Optional, Protocol, Union, cast
 
+import anyio
+import anyio.to_thread
 import tomlkit
 from pydantic import BaseModel, ConfigDict, Field
 
-# Type alias for a generic future.
-GenFuture = Union[Future, asyncio.Future]
-
-ContextT = TypeVar("ContextT")
+internal_error_ret_code = 999
 
 
 class ProcessingStrategy(enum.Enum):
@@ -36,10 +31,12 @@ class CommandStatus(enum.Enum):
     RUNNING = "Running"
     SUCCESS = "Success"
     FAILURE = "Failure"
+    TIMEOUT = "Timeout"
+    CANCELLED = "Cancelled"
 
     def completed(self) -> bool:
         """Return True if the command has completed."""
-        return self in [CommandStatus.SUCCESS, CommandStatus.FAILURE]
+        return self in [CommandStatus.SUCCESS, CommandStatus.FAILURE, CommandStatus.TIMEOUT, CommandStatus.CANCELLED]
 
 
 class Command(BaseModel):
@@ -55,7 +52,6 @@ class Command(BaseModel):
     unflushed: list[str] = Field(default=[], exclude=True)
     num_non_empty_lines: int = Field(default=0, exclude=True)
     ret_code: Optional[int] = Field(default=None, exclude=True)
-    fut: Optional[GenFuture] = Field(default=None, exclude=True)
     start_time: Optional[float] = Field(default=None, exclude=True)
     elapsed: Optional[float] = Field(default=None, exclude=True)
 
@@ -72,57 +68,38 @@ class Command(BaseModel):
         """Clear the unflushed output."""
         self.unflushed.clear()
 
-    def set_ret_code(self, ret_code: int):
+    def set_ret_code(self, ret_code: int) -> None:
         """Set the return code and status of the command."""
         if self.start_time:
             self.elapsed = time.perf_counter() - self.start_time
         self.ret_code = ret_code
-        if self.fut:
-            self.fut.cancel()
-            self.fut = None
         if ret_code == 0:
             self.status = CommandStatus.SUCCESS
         else:
             self.status = CommandStatus.FAILURE
 
-    def set_running(self):
+    def set_timeout(self) -> None:
+        """Set the command status to timeout."""
+        self.status = CommandStatus.TIMEOUT
+        if self.start_time:
+            self.elapsed = time.perf_counter() - self.start_time
+        self.ret_code = internal_error_ret_code
+
+    def set_running(self) -> None:
         """Set the command status to running."""
         self.start_time = time.perf_counter()
         self.status = CommandStatus.RUNNING
 
+    def set_cancelled(self) -> None:
+        """Set the command status to cancelled."""
+        self.status = CommandStatus.CANCELLED
+        self.ret_code = internal_error_ret_code
+
 
 class CommandCB(Protocol):
-    def on_start(self, cmd: Command) -> None: ...
-    def on_recv(self, cmd: Command, output: str) -> None: ...
-    def on_term(self, cmd: Command, exit_code: int) -> None: ...
-
-
-class CommandAsyncCB(Protocol):
     async def on_start(self, cmd: Command) -> None: ...
     async def on_recv(self, cmd: Command, output: str) -> None: ...
     async def on_term(self, cmd: Command, exit_code: int) -> None: ...
-
-
-class QRetriever:
-    def __init__(self, q: Queue, timeout: int, retries: int):
-        self.q = q
-        self.timeout = timeout
-        self.retries = retries
-
-    def get(self):
-        retry_count = 0
-        while True:
-            try:
-                return self.q.get(block=True, timeout=self.timeout)
-            except queue.Empty:  # noqa: PERF203
-                if retry_count < self.retries:
-                    retry_count += 1
-                    continue
-                else:
-                    raise TimeoutError("Timeout waiting for command output") from None
-
-    def __str__(self) -> str:
-        return f"QRetriever(timeout={self.timeout}, retries={self.retries})"
 
 
 class CommandGroup(BaseModel):
@@ -132,168 +109,115 @@ class CommandGroup(BaseModel):
     desc: Optional[str] = None
     cmds: OrderedDict[str, Command] = Field(default_factory=OrderedDict)
     timeout: int = Field(default=30)
-    retries: int = Field(default=3)
     cont_on_fail: bool = Field(default=False)
     serial: bool = Field(default=False)
     status: CommandStatus = CommandStatus.NOT_STARTED
 
-    def update_status(self, cmds: OrderedDict[str, Command]):
+    def update_status(self, cmds: OrderedDict[str, Command]) -> None:
         """Update the status of the command group."""
         if all(cmd.status == CommandStatus.SUCCESS for cmd in cmds.values()):
             self.status = CommandStatus.SUCCESS
         else:
             self.status = CommandStatus.FAILURE
 
-    async def run_async(
-        self,
-        strategy: ProcessingStrategy,
-        callbacks: CommandAsyncCB,
-    ):
-        q = mp.Manager().Queue()
-        pool = ProcessPoolExecutor()
-        futs = [
-            asyncio.get_event_loop().run_in_executor(pool, run_command, cmd.name, cmd.cmd, cmd.setenv, q)
-            for _, cmd in self.cmds.items()
-        ]
-
-        for (_, cmd), fut in zip(self.cmds.items(), futs):
-            cmd.fut = fut
-            cmd.set_running()
-
-        return await self._process_q_async(q, strategy, callbacks)
-
-    def run(self, strategy: ProcessingStrategy, callbacks: CommandCB):
-        q = mp.Manager().Queue()
-        pool = ProcessPoolExecutor()
-        cmd_series = [OrderedDict([(k, v)]) for k, v in self.cmds.items()] if self.serial else [self.cmds]
-        group_exit_code = 0
-
-        for cmd_entries in cmd_series:
-            futs = [pool.submit(run_command, cmd.name, cmd.cmd, cmd.setenv, q) for cmd in cmd_entries.values()]
-            for cmd, fut in zip(cmd_entries.values(), futs):
-                cmd.fut = fut
+    async def run_serial(self, callbacks: CommandCB) -> None:
+        try:
+            for ix in range(len(self.cmds.values())):
+                cmd = list(self.cmds.values())[ix]
                 cmd.set_running()
-            exit_code = self._process_q(cmd_entries, q, strategy, callbacks)
-            if exit_code != 0:
-                group_exit_code = 1
-                if not self.cont_on_fail:
+                async with anyio.create_task_group() as nursery:
+                    nursery.start_soon(self._run_command, cmd, ProcessingStrategy.ON_RECV, callbacks)
+                if cmd.status != CommandStatus.SUCCESS and not self.cont_on_fail:
+                    # Cancel all remaining cmds
+                    for jx in range(ix + 1, len(self.cmds.values())):
+                        cmd = list(self.cmds.values())[jx]
+                        cmd.set_cancelled()
+                    self.update_status(self.cmds)
                     break
-        return group_exit_code
+        except Exception as _:
+            self.status = CommandStatus.FAILURE
+        else:
+            self.update_status(self.cmds)
 
-    def _process_q(  # noqa: PLR0912
-        self,
-        cmds: OrderedDict[str, Command],
-        q: Queue,
-        strategy: ProcessingStrategy,
-        callbacks: CommandCB,
-    ) -> int:
-        grp_exit_code = 0
+    async def run_parallel(self, strategy: ProcessingStrategy, callbacks: CommandCB) -> None:
+        try:
+            async with anyio.create_task_group() as nursery:
+                for cmd in self.cmds.values():
+                    nursery.start_soon(self._run_command, cmd, strategy, callbacks)
+                    cmd.set_running()
+        except Exception as _:
+            self.status = CommandStatus.FAILURE
+        else:
+            self.update_status(self.cmds)
 
+    async def run(self, strategy: ProcessingStrategy, callbacks: CommandCB) -> None:
+        if self.serial:
+            await self.run_serial(callbacks)
+        else:
+            await self.run_parallel(strategy, callbacks)
+
+    async def _proces_stdxx_line(
+        self, cmd: Command, line: str, strategy: ProcessingStrategy, callbacks: CommandCB
+    ) -> None:
         if strategy == ProcessingStrategy.ON_RECV:
-            for cmd in cmds.values():
-                callbacks.on_start(cmd)
+            await callbacks.on_recv(cmd, line)
+        elif strategy == ProcessingStrategy.ON_COMP:
+            cmd.append_unflushed(line)
+        cmd.incr_line_count(line)
 
-        q_ret = QRetriever(q, self.timeout, self.retries)
-        while True:
-            q_result = q_ret.get()
+    async def _process_stdxxx(
+        self, cmd: Command, strategy: ProcessingStrategy, stream: AsyncIterable[bytes], callbacks: CommandCB
+    ) -> None:
+        await callbacks.on_start(cmd)
 
-            # Can only get here with a valid message from the Q
-            cmd_name = q_result[0]
-            exit_code: Optional[int] = q_result[1] if isinstance(q_result[1], int) else None
-            output_line: Optional[str] = q_result[1] if isinstance(q_result[1], str) else None
-            if exit_code is None and output_line is None:
-                raise ValueError("Invalid Q message")  # pragma: no cover
+        incomplete_line = ""
 
-            cmd = self.cmds[cmd_name]
-            if strategy == ProcessingStrategy.ON_RECV:
-                if output_line is not None:
-                    cmd.incr_line_count(output_line)
-                    callbacks.on_recv(cmd, output_line)
-                elif exit_code is not None:
-                    cmd.set_ret_code(exit_code)
-                    callbacks.on_term(cmd, exit_code)
-                    if exit_code != 0:
-                        grp_exit_code = 1
-                else:
-                    raise ValueError("Invalid Q message")  # pragma: no cover
+        async for chunk in stream:
+            # Decode the bytes to a string
+            decoded_chunk = chunk.decode("utf-8")
+            # Combine the remainder of the last chunk with the new chunk
+            lines = (incomplete_line + decoded_chunk).split("\n")
 
-            if strategy == ProcessingStrategy.ON_COMP:
-                if output_line is not None:
-                    cmd.incr_line_count(output_line)
-                    cmd.append_unflushed(output_line)
-                elif exit_code is not None:
-                    callbacks.on_start(cmd)
-                    for line in cmd.unflushed:
-                        callbacks.on_recv(cmd, line)
-                    cmd.clear_unflushed()
-                    callbacks.on_term(cmd, exit_code)
-                    cmd.set_ret_code(exit_code)
-                    if exit_code != 0:
-                        grp_exit_code = 1
-                else:
-                    raise ValueError("Invalid Q message")  # pragma: no cover
+            # The last line might be incomplete; hold it back
+            incomplete_line = lines.pop() if lines[-1] else ""
 
-            if all(cmd.status.completed() for cmd in cmds.values()):
-                self.update_status(cmds)
-                break
-        return grp_exit_code
+            for line in lines:
+                await self._proces_stdxx_line(cmd, line, strategy, callbacks)
 
-    async def _process_q_async(  # noqa: PLR0912
-        self,
-        q: Queue,
-        strategy: ProcessingStrategy,
-        callbacks: CommandAsyncCB,
-    ) -> int:
-        grp_exit_code = 0
+        if incomplete_line:
+            await self._proces_stdxx_line(cmd, incomplete_line, strategy, callbacks)  # pragma: no cover
 
-        if strategy == ProcessingStrategy.ON_RECV:
-            for cmd in self.cmds.values():
-                await callbacks.on_start(cmd)
+        if strategy == ProcessingStrategy.ON_COMP:
+            for _ix, line in enumerate(cmd.unflushed):
+                await callbacks.on_recv(cmd, line)
+            cmd.clear_unflushed()
 
-        q_ret = QRetriever(q, self.timeout, self.retries)
-        while True:
-            await asyncio.sleep(0)
-            q_result = q_ret.get()
+    async def _run_command(self, cmd: Command, strategy: ProcessingStrategy, callbacks: CommandCB) -> int:
+        env = os.environ.copy()
+        if cmd.setenv:
+            env.update(cmd.setenv)
 
-            # Can only get here with a valid message from the Q
-            cmd_name = q_result[0]
-            exit_code: Optional[int] = q_result[1] if isinstance(q_result[1], int) else None
-            output_line: Optional[str] = q_result[1] if isinstance(q_result[1], str) else None
-            if exit_code is None and output_line is None:
-                raise ValueError("Invalid Q message")  # pragma: no cover
-
-            cmd = self.cmds[cmd_name]
-            if strategy == ProcessingStrategy.ON_RECV:
-                if output_line is not None:
-                    cmd.incr_line_count(output_line)
-                    await callbacks.on_recv(cmd, output_line)
-                elif exit_code is not None:
-                    cmd.set_ret_code(exit_code)
-                    await callbacks.on_term(cmd, exit_code)
-                    if exit_code != 0:
-                        grp_exit_code = 1
-                else:
-                    raise ValueError("Invalid Q message")  # pragma: no cover
-
-            if strategy == ProcessingStrategy.ON_COMP:
-                if output_line is not None:
-                    cmd.incr_line_count(output_line)
-                    cmd.append_unflushed(output_line)
-                elif exit_code is not None:
-                    await callbacks.on_start(cmd)
-                    for line in cmd.unflushed:
-                        await callbacks.on_recv(cmd, line)
-                    cmd.clear_unflushed()
-                    await callbacks.on_term(cmd, exit_code)
-                    cmd.set_ret_code(exit_code)
-                    if exit_code != 0:
-                        grp_exit_code = 1
-                else:
-                    raise ValueError("Invalid Q message")  # pragma: no cover
-
-            if all(cmd.status.completed() for _, cmd in self.cmds.items()):
-                break
-        return grp_exit_code
+        # Running the command asynchronously and capturing the output
+        try:
+            with anyio.fail_after(self.timeout):
+                async with (
+                    await anyio.open_process(
+                        command=cmd.cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                    ) as process,
+                    anyio.create_task_group() as tg,
+                ):
+                    if process.stdout:
+                        tg.start_soon(self._process_stdxxx, cmd, strategy, process.stdout, callbacks)
+                    await process.wait()
+        except TimeoutError:
+            cmd.set_timeout()
+            await callbacks.on_term(cmd, internal_error_ret_code)
+            return internal_error_ret_code
+        else:
+            exit_code = cast(int, process.returncode)
+            cmd.set_ret_code(exit_code)
+            await callbacks.on_term(cmd, exit_code)
+            return exit_code
 
 
 def _validate_mandatory_keys(data: tomlkit.items.Table, keys: list[str], context: str) -> tuple[Any, ...]:
@@ -314,7 +238,7 @@ def _validate_mandatory_keys(data: tomlkit.items.Table, keys: list[str], context
     return tuple(vals)
 
 
-def _get_optional_keys(data: tomlkit.items.Table, keys: list[str], default=None) -> tuple[Optional[Any], ...]:
+def _get_optional_keys(data: tomlkit.items.Table, keys: list[str], default: Any = None) -> tuple[Optional[Any], ...]:  # noqa: ANN001, ANN401
     """Get Optional keys or default.
 
     Args:
@@ -356,17 +280,15 @@ def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
     command_groups = []
     for group_data in cmd_groups_data.get("groups", []):
         (group_name,) = _validate_mandatory_keys(group_data, ["name"], "top level par-run group")
-        group_desc, group_timeout, group_retries = _get_optional_keys(
+        group_desc, group_timeout = _get_optional_keys(
             group_data,
-            ["desc", "timeout", "retries"],
+            ["desc", "timeout"],
             default=None,
         )
         (group_cont_on_fail, group_serial) = _get_optional_keys(group_data, ["cont_on_fail", "serial"], default=False)
 
         if not group_timeout:
             group_timeout = 30
-        if not group_retries:
-            group_retries = 3
         group_cont_on_fail = bool(group_cont_on_fail and group_cont_on_fail is True)
         group_serial = bool(group_serial and group_serial is True)
 
@@ -381,46 +303,9 @@ def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
             desc=group_desc,
             cmds=commands,
             timeout=group_timeout,
-            retries=group_retries,
             cont_on_fail=group_cont_on_fail,
             serial=group_serial,
         )
         command_groups.append(command_group)
 
     return command_groups
-
-
-def run_command(name: str, command: str, setenv: Optional[dict[str, str]], q: Queue) -> None:
-    """Run a command and put the output into a queue. The output is a tuple of the command
-    name and the output line. The final output is a tuple of the command name and a dictionary
-    with the return code.
-
-    Args:
-    ----
-        name (Command): Command to run.
-        q (Queue): Queue to put the output into.
-
-    """
-    new_env = None
-    if setenv:
-        new_env = os.environ.copy()
-        new_env.update(setenv)
-
-    with subprocess.Popen(
-        command,
-        shell=True,
-        env=new_env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    ) as process:
-        if process.stdout:
-            for line in iter(process.stdout.readline, ""):
-                q.put((name, line.strip()))
-            process.stdout.close()
-            process.wait()
-            ret_code = process.returncode
-            if ret_code is not None:
-                q.put((name, int(ret_code)))
-            else:
-                raise ValueError("Process has no return code")  # pragma: no cover

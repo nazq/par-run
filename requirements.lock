@@ -11,13 +11,15 @@
 annotated-types==0.6.0
     # via pydantic
 anyio==4.3.0
+    # via par-run
     # via starlette
     # via watchfiles
 click==8.1.7
     # via typer
     # via uvicorn
-exceptiongroup==1.2.0
+exceptiongroup==1.2.1
     # via anyio
+    # via par-run
 fastapi==0.110.1
     # via par-run
 h11==0.14.0

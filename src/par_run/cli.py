@@ -4,8 +4,9 @@ import contextlib
 import enum
 from collections import OrderedDict
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
+import anyio
 import rich
 import typer
 
@@ -17,13 +18,13 @@ cli_app = typer.Typer()
 
 
 # Web only functions
-def clean_up():
+def clean_up() -> None:
     """Clean up by removing the PID file."""
     Path(PID_FILE).unlink()
     typer.echo("Cleaned up PID file.")
 
 
-def start_web_server(port: int):
+def start_web_server(port: int) -> None:
     """Start the web server"""
     if Path(PID_FILE).is_file():
         typer.echo("UVicorn server is already running.")
@@ -49,6 +50,7 @@ def start_web_server(port: int):
             test_port = get_process_port(process.pid)
             if port == test_port:
                 typer.echo(f"UVicorn server is running on port {port} in {(time.time_ns() - start_time)/10**6:.2f} ms.")
+                typer.echo(f"Server running at http://localhost:{port}/")
                 break
             time.sleep(0.1)  # Poll every 0.1 seconds
 
@@ -57,7 +59,7 @@ def start_web_server(port: int):
             typer.echo("run 'par-run web status' to check the status.")
 
 
-def stop_web_server():
+def stop_web_server() -> None:
     """Stop the UVicorn server by reading its PID from the PID file and sending a termination signal."""
     if not Path(PID_FILE).is_file():
         typer.echo("UVicorn server is not running.")
@@ -81,7 +83,7 @@ def get_process_port(pid: int) -> Optional[int]:
     return None
 
 
-def list_uvicorn_processes():
+def list_uvicorn_processes() -> None:
     """Check for other UVicorn processes and list them"""
     uvicorn_processes = []
     with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -98,7 +100,7 @@ def list_uvicorn_processes():
         typer.echo("No other UVicorn processes found.")
 
 
-def get_web_server_status():
+def get_web_server_status() -> None:
     """Get the status of the UVicorn server by reading its PID from the PID file."""
     if not Path(PID_FILE).is_file():
         typer.echo("No pid file found. Server likely not running.")
@@ -126,33 +128,44 @@ class WebCommand(enum.Enum):
     RESTART = "restart"
     STATUS = "status"
 
-    def __str__(self):
+    def __str__(self) -> str:
+        return self.value
+
+
+class AsyncBackend(enum.Enum):
+    """Async backend enumeration."""
+
+    TRIO = "trio"
+    ASYNCIO = "asyncio"
+    ASYNCIO_NATIVE = "asyncio-native"
+
+    def __str__(self) -> str:
         return self.value
 
 
 class CLICommandCBOnComp:
-    def on_start(self, cmd: Command):
-        rich.print(f"[blue bold]Completed command {cmd.name}[/]")
+    async def on_start(self, cmd: Command) -> None:
+        rich.print(f"[blue bold]{cmd.name}: Started[/]")
 
-    def on_recv(self, _: Command, output: str):
+    async def on_recv(self, _: Command, output: str) -> None:
         rich.print(output)
 
-    def on_term(self, cmd: Command, exit_code: int):
+    async def on_term(self, cmd: Command, exit_code: int) -> None:
         """Callback function for when a command receives output"""
         if cmd.status == CommandStatus.SUCCESS:
-            rich.print(f"[green bold]Command {cmd.name} finished[/]")
+            rich.print(f"[green bold]{cmd.name}: Finished[/]")
         elif cmd.status == CommandStatus.FAILURE:
-            rich.print(f"[red bold]Command {cmd.name} failed, {exit_code=:}[/]")
+            rich.print(f"[red bold]{cmd.name}: Failed, {exit_code=:}[/]")
 
 
 class CLICommandCBOnRecv:
-    def on_start(self, cmd: Command):
+    async def on_start(self, cmd: Command) -> None:
         rich.print(f"[blue bold]{cmd.name}: Started[/]")
 
-    def on_recv(self, cmd: Command, output: str):
+    async def on_recv(self, cmd: Command, output: str) -> None:
         rich.print(f"{cmd.name}: {output}")
 
-    def on_term(self, cmd: Command, exit_code: int):
+    async def on_term(self, cmd: Command, exit_code: int) -> None:
         """Callback function for when a command receives output"""
         if cmd.status == CommandStatus.SUCCESS:
             rich.print(f"[green bold]{cmd.name}: Finished[/]")
@@ -180,12 +193,10 @@ def format_elapsed_time(seconds: float) -> str:
     return f"{hours:02}:{minutes:02}:{seconds:06.3f}"
 
 
-def show_commands(groups: list[CommandGroup]):
+def show_commands(groups: list[CommandGroup]) -> None:
     for grp in groups:
         rich.print(f"[blue bold]Group: {grp.name}[/]")
-        rich.print(
-            f"Params: cont_on_fail={grp.cont_on_fail}, serial={grp.serial}, timeout={grp.timeout}, retries={grp.retries}"
-        )
+        rich.print(f"Params: cont_on_fail={grp.cont_on_fail}, serial={grp.serial}, timeout={grp.timeout}")
         for cmd in grp.cmds.values():
             rich.print(f"[green bold]{cmd.name}[/]: {cmd.cmd}")
 
@@ -229,20 +240,21 @@ def build_results_tbl() -> rich.table.Table:
     return res_tbl
 
 
+def command_status_to_emoji(cmd: Command) -> tuple[str, str]:
+    if cmd.status == CommandStatus.SUCCESS:
+        return ("✅", "green")
+    elif cmd.status == CommandStatus.FAILURE:
+        return ("❌", "red")
+    elif cmd.status == CommandStatus.TIMEOUT:
+        return ("⏰", "orange1")
+    else:
+        return ("🚫", "red")
+
+
 def add_command_row(tbl: rich.table.Table, cmd: Command, group_name: str) -> rich.table.Table:
     elap_str = format_elapsed_time(cmd.elapsed) if cmd.elapsed else "XX:XX:XX.xxx"
-
-    if cmd.status == CommandStatus.SUCCESS:
-        cmd_status = "✅"
-        row_style = "green"
-    elif cmd.status == CommandStatus.FAILURE:
-        cmd_status = "❌"
-        row_style = "red"
-    else:
-        cmd_status = "⏳"
-        row_style = "yellow"
-
-    tbl.add_row(group_name, cmd.name, cmd.cmd, cmd_status, elap_str, style=row_style)
+    emoji, row_style = command_status_to_emoji(cmd)
+    tbl.add_row(group_name, cmd.name, cmd.cmd, emoji, elap_str, style=row_style)
     return tbl
 
 
@@ -255,25 +267,36 @@ def fmt_group_name(cmd_group: CommandGroup) -> str:
         return f"[yellow]{cmd_group.name}[/]"
 
 
-style_default = typer.Option(help="Processing strategy", default="comp")
+style_default = typer.Option(help="Processing strategy, for serial commands this is always --recv", default="comp")
 show_default = typer.Option(help="Show available groups and commands", default=False)
 pyproj_default = typer.Option(help="The default toml file to use", default=Path("pyproject.toml"))
 groups_default = typer.Option(help="Run a specific group of commands, comma spearated", default=None)
 cmds_default = typer.Option(help="Run specific commands, comma separated", default=None)
+backend_default = typer.Option(help="The backend to use", default="trio")
+
+backend_options: dict[AsyncBackend, Any] = {
+    AsyncBackend.TRIO: {"backend": "trio", "backend_options": {}},
+    AsyncBackend.ASYNCIO: {"backend": "asyncio", "backend_options": {"use_uvloop": True}},
+    AsyncBackend.ASYNCIO_NATIVE: {"backend": "asyncio", "backend_options": {"use_uvloop": False}},
+}
 
 
 @cli_app.command()
-def run(
+def run(  # noqa: PLR0913
     style: Annotated[ProcessingStrategy, typer.Option] = style_default,
     show: Annotated[bool, typer.Option] = show_default,
     file: Annotated[Path, typer.Option] = pyproj_default,
     groups: Annotated[Optional[str], typer.Option] = groups_default,
     cmds: Annotated[Optional[str], typer.Option] = cmds_default,
-):
+    backend: Annotated[AsyncBackend, typer.Option] = backend_default,
+) -> None:
     """Run commands in parallel"""
     # Overall exit code, need to track all command exit codes to update this
     exit_code = 0
     st_all = time.perf_counter()
+
+    actual_backend = backend_options[backend]["backend"]
+    actual_backend_opts = backend_options[backend]["backend_options"]
 
     master_groups = read_commands_toml(file)
     if show:
@@ -286,15 +309,17 @@ def run(
         raise typer.Exit(0)
 
     for grp in master_groups:
+        # Run the async function with Trio's event loop
         if style == ProcessingStrategy.ON_COMP:
-            exit_code = grp.run(style, CLICommandCBOnComp())
+            anyio.run(grp.run, style, CLICommandCBOnComp(), backend=actual_backend, backend_options=actual_backend_opts)
         elif style == ProcessingStrategy.ON_RECV:
-            exit_code = grp.run(style, CLICommandCBOnRecv())
+            anyio.run(grp.run, style, CLICommandCBOnRecv(), backend=actual_backend, backend_options=actual_backend_opts)
         else:
             raise typer.BadParameter("Invalid processing strategy")  # pragma: no cover
-        if exit_code != 0 and not grp.cont_on_fail:
-            break
-
+        if grp.status != CommandStatus.SUCCESS:
+            exit_code = 1
+            if not grp.cont_on_fail:
+                break
     # Summarise the results
     console = rich.console.Console()
     res_tbl = build_results_tbl()
@@ -337,7 +362,7 @@ try:
     def web(
         command: WebCommand = command_default,
         port: int = port_default,
-    ):
+    ) -> None:
         """Run the web server"""
         if command == WebCommand.START:
             start_web_server(port)
@@ -349,11 +374,8 @@ try:
         elif command == WebCommand.STATUS:
             get_web_server_status()
         else:
-            typer.echo(f"Not a valid command '{command}'", err=True)
-            raise typer.Abort()
+            typer.echo(f"Not a valid command '{command}'", err=True)  # pragma: no cover
+            raise typer.Abort()  # pragma: no cover
 
 except ImportError:  # pragma: no cover
     pass  # pragma: no cover
-
-if __name__ == "__main__":
-    cli_app()
