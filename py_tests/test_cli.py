@@ -15,6 +15,7 @@ from par_run.cli import (
     build_results_tbl,
     clean_up,
     cli_app,
+    command_status_to_emoji,
     fmt_group_name,
     get_process_port,
     get_web_server_status,
@@ -489,3 +490,37 @@ def test_fmt_group_name() -> None:
     fmt_res = fmt_group_name(cmd_grp)
     assert cmd_name in fmt_res
     assert "[yellow]" in fmt_res
+
+
+def test_add_command_row_colours() -> None:
+    command = Command(name="cmd1", cmd="echo 'Hello'")
+    command.status = CommandStatus.SUCCESS
+    emoji, row_style = command_status_to_emoji(command)
+    assert emoji
+    assert "green" in row_style
+
+    command.status = CommandStatus.FAILURE
+    emoji, row_style = command_status_to_emoji(command)
+    assert emoji
+    assert "red" in row_style
+
+    command.status = CommandStatus.NOT_STARTED
+    emoji, row_style = command_status_to_emoji(command)
+    assert emoji
+    assert "red" in row_style
+
+    command.status = CommandStatus.RUNNING
+    emoji, row_style = command_status_to_emoji(command)
+    assert emoji
+    assert "red" in row_style
+
+    command.status = CommandStatus.TIMEOUT
+    emoji, row_style = command_status_to_emoji(command)
+    assert emoji
+    assert "orange1" in row_style
+
+
+def test_cli_app() -> None:
+    with pytest.raises(SystemExit):
+        app = cli_app(["--help"])
+        assert app

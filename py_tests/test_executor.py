@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pytest
@@ -13,6 +14,9 @@ from par_run.executor import (
     _get_optional_keys,
     _validate_mandatory_keys,
     read_commands_toml,
+)
+from par_run.executor import (
+    internal_error_ret_code as internal_err_ret_code,
 )
 from py_tests.conftest import AnyIOBackendT
 
@@ -71,7 +75,7 @@ class TestCommandCB:
             assert cmd.ret_code != 0
 
 
-def test_command_group(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
+def test_command_group_parallel(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
     command1 = Command(name="test1", cmd="echo 'Hello, World!'", passenv=["PATH"])
     command2 = Command(name="test2", cmd="echo 'World, Hey!'", setenv={"TEST": "test"})
     commands = OrderedDict()
@@ -101,18 +105,13 @@ def test_command_group(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, A
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
 
 
-@pytest.fixture(
-    params=[
-        pytest.param(("asyncio", {"use_uvloop": True}), id="asyncio+uvloop"),
-        pytest.param(("asyncio", {"use_uvloop": False}), id="asyncio"),
-    ]
-)
-def test_command_group_timeout(request) -> None:  # noqa: ARG001, ANN001
-    anyio_backend = request.param  # noqa: F841
-    command1 = Command(name="test1", cmd="echo 'Hello, World!' && sleep 2 && exit 0", passenv=["PATH"])
+def test_command_group_serial(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
+    command1 = Command(name="test1", cmd="echo 'Hello, World!'", passenv=["PATH"])
+    command2 = Command(name="test2", cmd="echo 'World, Hey!'", setenv={"TEST": "test"})
     commands = OrderedDict()
     commands[command1.name] = command1
-    group = CommandGroup(name="test_group", cmds=commands, timeout=1)
+    commands[command2.name] = command2
+    group = CommandGroup(name="test_group", cmds=commands, serial=True)
     anyio.run(group.run, ProcessingStrategy.ON_COMP, TestCommandCB())
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
@@ -120,6 +119,94 @@ def test_command_group_timeout(request) -> None:  # noqa: ARG001, ANN001
     assert all(cmd.unflushed == [] for cmd in group.cmds.values())
     assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
     assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+
+    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
+    command2 = Command(name="test2", cmd="echo 'World, Hey!'")
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    commands[command2.name] = command2
+    group = CommandGroup(name="test_group", cmds=commands)
+    anyio.run(group.run, ProcessingStrategy.ON_RECV, TestCommandCB())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
+    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+
+
+def test_command_group_serial_part_fail(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
+    command1 = Command(name="test1", cmd="echo 'Hello, World!' && exit 1", passenv=["PATH"])
+    command2 = Command(name="test2", cmd="echo 'World, Hey!'", setenv={"TEST": "test"})
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    commands[command2.name] = command2
+    group = CommandGroup(name="test_group", cmds=commands, serial=True)
+
+    anyio.run(group.run, ProcessingStrategy.ON_COMP, TestCommandCB())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert command1.ret_code == 1
+    assert command2.ret_code == internal_err_ret_code
+    assert command1.status == CommandStatus.FAILURE
+    assert command2.status == CommandStatus.CANCELLED
+    assert command1.num_non_empty_lines == 1
+    assert command2.num_non_empty_lines == 0
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+
+    command1 = Command(name="test1", cmd="echo 'Hello, World!' && exit 1")
+    command2 = Command(name="test2", cmd="echo 'World, Hey!'")
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    commands[command2.name] = command2
+    group = CommandGroup(name="test_group", cmds=commands, serial=True)
+    anyio.run(group.run, ProcessingStrategy.ON_RECV, TestCommandCB())
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert command1.ret_code == 1
+    assert command2.ret_code == internal_err_ret_code
+    assert command1.status == CommandStatus.FAILURE
+    assert command2.status == CommandStatus.CANCELLED
+    assert command1.num_non_empty_lines == 1
+    assert command2.num_non_empty_lines == 0
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+
+
+@pytest.fixture(
+    params=[
+        pytest.param(("asyncio", {"use_uvloop": True}), id="asyncio+uvloop"),
+        pytest.param(("asyncio", {"use_uvloop": False}), id="asyncio"),
+        pytest.param(("trio", {}), id="trio"),
+    ]
+)
+def anyio_backend_asyncio(request: pytest.FixtureRequest) -> tuple[str, dict[str, Any]]:
+    return request.param
+
+
+def test_command_group_timeout_on_recv(anyio_backend_asyncio) -> None:  # noqa: ARG001, ANN001
+    command1 = Command(name="test1", cmd="echo 'Hello, World!' && sleep 2 && exit 0", passenv=["PATH"])
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    group = CommandGroup(name="test_group", cmds=commands, timeout=1)
+    anyio.run(group.run, ProcessingStrategy.ON_RECV, TestCommandCB())
+
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code == internal_err_ret_code for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+    assert all(cmd.status == CommandStatus.TIMEOUT for cmd in group.cmds.values())
+
+
+def test_command_group_timeout_on_comp(anyio_backend_asyncio) -> None:  # noqa: ARG001, ANN001
+    command1 = Command(name="test1", cmd="echo 'Hello, World!' && sleep 2 && exit 0", passenv=["PATH"])
+    commands = OrderedDict()
+    commands[command1.name] = command1
+    group = CommandGroup(name="test_group", cmds=commands, timeout=1)
+    anyio.run(group.run, ProcessingStrategy.ON_COMP, TestCommandCB())
+    timeout_ret_code = 999
+    assert all(cmd.status.completed() for cmd in group.cmds.values())
+    assert all(cmd.ret_code == timeout_ret_code for cmd in group.cmds.values())
+    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
+    assert all(len(cmd.unflushed) > 0 for cmd in group.cmds.values())
+    assert all(cmd.status == CommandStatus.TIMEOUT for cmd in group.cmds.values())
 
 
 def test_command_group_part_fail(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
@@ -297,17 +384,9 @@ def test_read_commands_toml(filename: str) -> None:
 def test_read_commands_toml_missing_section(tmp_path: Path) -> None:
     # Create a valid TOML file without the par-run section
     toml_content = """
-    [command_group]
-    name = "Test Group"
-    desc = "Test description"
-    timeout = 30
-    cont_on_fail = false
-    serial = false
-
-    [[command_group.cmds]]
-    name = "Test Command"
-    cmd = "echo 'Hello, World!'"
-    """
+[BAD_HEADER]
+desc = "par-run from pyproject.toml"
+"""
 
     toml_file = tmp_path / "test_commands.toml"
     toml_file.write_text(toml_content)
@@ -315,3 +394,148 @@ def test_read_commands_toml_missing_section(tmp_path: Path) -> None:
     # Call the function and assert that it raises a ValueError
     with pytest.raises(ValueError):
         read_commands_toml(toml_file)
+
+
+def test_read_commands_toml_pyproj(tmp_path: Path) -> None:
+    # Create a valid TOML file without the par-run section
+    toml_content = """
+[tool.par-run]
+desc = "par-run from pyproject.toml"
+
+[[tool.par-run.groups]]
+name = "Formatting"
+desc = "Code formatting commands."
+cont_on_fail = true # default is false
+serial = false # default is false
+timeout = 5
+
+  [[tool.par-run.groups.commands]]
+  name = "ruff_fmt"
+  exec = "ruff format src py_tests"
+  # Define an empty extras using standard table notation, or simply omit it if it's always empty
+
+  [[tool.par-run.groups.commands]]
+  name = "ruff_fix"
+  exec = "ruff check --fix src py_tests"
+
+[[tool.par-run.groups]]
+name = "Formatting2"
+desc = "Code formatting commands."
+cont_on_fail = true # default is false
+serial = true # default is false
+timeout = 10
+
+  [[tool.par-run.groups.commands]]
+  name = "ruff_fmt"
+  exec = "ruff format src py_tests"
+  # Define an empty extras using standard table notation, or simply omit it if it's always empty
+
+  [[tool.par-run.groups.commands]]
+  name = "ruff_fix"
+  exec = "ruff check --fix src py_tests"
+    """
+
+    toml_file = tmp_path / "pyproject.toml"
+    toml_file.write_text(toml_content)
+
+    num_groups = 2
+    group_1_timeout = 5
+    group_2_timeout = 10
+
+    groups = read_commands_toml(toml_file)
+    assert len(groups) == num_groups
+    assert groups[0].name == "Formatting"
+    assert groups[0].timeout == group_1_timeout
+    assert groups[0].serial is False
+
+    assert groups[1].name == "Formatting2"
+    assert groups[1].timeout == group_2_timeout
+    assert groups[1].serial
+
+
+def test_read_commands_toml_non_pyproj(tmp_path: Path) -> None:
+    # Create a valid TOML file without the par-run section
+    toml_content = """
+[par-run]
+desc = "par-run from pyproject.toml"
+
+[[par-run.groups]]
+name = "Formatting"
+desc = "Code formatting commands."
+cont_on_fail = true # default is false
+serial = false # default is false
+timeout = 5
+
+  [[par-run.groups.commands]]
+  name = "ruff_fmt"
+  exec = "ruff format src py_tests"
+  # Define an empty extras using standard table notation, or simply omit it if it's always empty
+
+  [[par-run.groups.commands]]
+  name = "ruff_fix"
+  exec = "ruff check --fix src py_tests"
+
+[[par-run.groups]]
+name = "Formatting2"
+desc = "Code formatting commands."
+cont_on_fail = true # default is false
+serial = true # default is false
+timeout = 10
+
+  [[par-run.groups.commands]]
+  name = "ruff_fmt"
+  exec = "ruff format src py_tests"
+  # Define an empty extras using standard table notation, or simply omit it if it's always empty
+
+  [[par-run.groups.commands]]
+  name = "ruff_fix"
+  exec = "ruff check --fix src py_tests"
+    """
+
+    toml_file = tmp_path / "test_commands.toml"
+    toml_file.write_text(toml_content)
+
+    num_groups = 2
+    group_1_timeout = 5
+    group_2_timeout = 10
+
+    groups = read_commands_toml(toml_file)
+    assert len(groups) == num_groups
+    assert groups[0].name == "Formatting"
+    assert groups[0].timeout == group_1_timeout
+    assert groups[0].serial is False
+
+    assert groups[1].name == "Formatting2"
+    assert groups[1].timeout == group_2_timeout
+    assert groups[1].serial
+
+
+def test_read_commands_toml_timeout_default(tmp_path: Path) -> None:
+    # Create a valid TOML file without the par-run section
+    toml_content = """
+[par-run]
+desc = "par-run from pyproject.toml"
+
+[[par-run.groups]]
+name = "Formatting"
+desc = "Code formatting commands."
+cont_on_fail = true # default is false
+serial = false # default is false
+
+  [[par-run.groups.commands]]
+  name = "ruff_fmt"
+  exec = "ruff format src py_tests"
+  # Define an empty extras using standard table notation, or simply omit it if it's always empty
+
+  [[par-run.groups.commands]]
+  name = "ruff_fix"
+  exec = "ruff check --fix src py_tests"
+  # Define an empty extras using standard table notation, or simply omit it if it's always empty
+    """
+
+    toml_file = tmp_path / "test_commands.toml"
+    toml_file.write_text(toml_content)
+
+    groups = read_commands_toml(toml_file)
+    default_timeout = 30
+    assert groups[0].timeout == default_timeout

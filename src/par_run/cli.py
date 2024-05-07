@@ -132,9 +132,20 @@ class WebCommand(enum.Enum):
         return self.value
 
 
+class AsyncBackend(enum.Enum):
+    """Async backend enumeration."""
+
+    TRIO = "trio"
+    ASYNCIO = "asyncio"
+    ASYNCIO_NATIVE = "asyncio-native"
+
+    def __str__(self) -> str:
+        return self.value
+
+
 class CLICommandCBOnComp:
     async def on_start(self, cmd: Command) -> None:
-        rich.print(f"[blue bold]Completed command {cmd.name}[/]")
+        rich.print(f"[blue bold]{cmd.name}: Started[/]")
 
     async def on_recv(self, _: Command, output: str) -> None:
         rich.print(output)
@@ -142,9 +153,9 @@ class CLICommandCBOnComp:
     async def on_term(self, cmd: Command, exit_code: int) -> None:
         """Callback function for when a command receives output"""
         if cmd.status == CommandStatus.SUCCESS:
-            rich.print(f"[green bold]Command {cmd.name} finished[/]")
+            rich.print(f"[green bold]{cmd.name}: Finished[/]")
         elif cmd.status == CommandStatus.FAILURE:
-            rich.print(f"[red bold]Command {cmd.name} failed, {exit_code=:}[/]")
+            rich.print(f"[red bold]{cmd.name}: Failed, {exit_code=:}[/]")
 
 
 class CLICommandCBOnRecv:
@@ -229,23 +240,21 @@ def build_results_tbl() -> rich.table.Table:
     return res_tbl
 
 
+def command_status_to_emoji(cmd: Command) -> tuple[str, str]:
+    if cmd.status == CommandStatus.SUCCESS:
+        return ("✅", "green")
+    elif cmd.status == CommandStatus.FAILURE:
+        return ("❌", "red")
+    elif cmd.status == CommandStatus.TIMEOUT:
+        return ("⏰", "orange1")
+    else:
+        return ("🚫", "red")
+
+
 def add_command_row(tbl: rich.table.Table, cmd: Command, group_name: str) -> rich.table.Table:
     elap_str = format_elapsed_time(cmd.elapsed) if cmd.elapsed else "XX:XX:XX.xxx"
-
-    if cmd.status == CommandStatus.SUCCESS:
-        cmd_status = "✅"
-        row_style = "green"
-    elif cmd.status == CommandStatus.FAILURE:
-        cmd_status = "❌"
-        row_style = "red"
-    elif cmd.status == CommandStatus.TIMEOUT:
-        cmd_status = "⏰"
-        row_style = "orange1"
-    else:
-        cmd_status = "⏳"
-        row_style = "yellow"
-
-    tbl.add_row(group_name, cmd.name, cmd.cmd, cmd_status, elap_str, style=row_style)
+    emoji, row_style = command_status_to_emoji(cmd)
+    tbl.add_row(group_name, cmd.name, cmd.cmd, emoji, elap_str, style=row_style)
     return tbl
 
 
@@ -258,16 +267,17 @@ def fmt_group_name(cmd_group: CommandGroup) -> str:
         return f"[yellow]{cmd_group.name}[/]"
 
 
-style_default = typer.Option(help="Processing strategy", default="comp")
+style_default = typer.Option(help="Processing strategy, for serial commands this is always --recv", default="comp")
 show_default = typer.Option(help="Show available groups and commands", default=False)
 pyproj_default = typer.Option(help="The default toml file to use", default=Path("pyproject.toml"))
 groups_default = typer.Option(help="Run a specific group of commands, comma spearated", default=None)
 cmds_default = typer.Option(help="Run specific commands, comma separated", default=None)
 backend_default = typer.Option(help="The backend to use", default="trio")
 
-backend_options: dict[str, Any] = {
-    "trio": {},
-    "asyncio": {"use_uvloop": True},
+backend_options: dict[AsyncBackend, Any] = {
+    AsyncBackend.TRIO: {"backend": "trio", "backend_options": {}},
+    AsyncBackend.ASYNCIO: {"backend": "asyncio", "backend_options": {"use_uvloop": True}},
+    AsyncBackend.ASYNCIO_NATIVE: {"backend": "asyncio", "backend_options": {"use_uvloop": False}},
 }
 
 
@@ -278,12 +288,15 @@ def run(  # noqa: PLR0913
     file: Annotated[Path, typer.Option] = pyproj_default,
     groups: Annotated[Optional[str], typer.Option] = groups_default,
     cmds: Annotated[Optional[str], typer.Option] = cmds_default,
-    backend: Annotated[str, typer.Option] = backend_default,
+    backend: Annotated[AsyncBackend, typer.Option] = backend_default,
 ) -> None:
     """Run commands in parallel"""
     # Overall exit code, need to track all command exit codes to update this
     exit_code = 0
     st_all = time.perf_counter()
+
+    actual_backend = backend_options[backend]["backend"]
+    actual_backend_opts = backend_options[backend]["backend_options"]
 
     master_groups = read_commands_toml(file)
     if show:
@@ -298,9 +311,9 @@ def run(  # noqa: PLR0913
     for grp in master_groups:
         # Run the async function with Trio's event loop
         if style == ProcessingStrategy.ON_COMP:
-            anyio.run(grp.run, style, CLICommandCBOnComp(), backend=backend, backend_options=backend_options[backend])
+            anyio.run(grp.run, style, CLICommandCBOnComp(), backend=actual_backend, backend_options=actual_backend_opts)
         elif style == ProcessingStrategy.ON_RECV:
-            anyio.run(grp.run, style, CLICommandCBOnRecv(), backend=backend, backend_options=backend_options[backend])
+            anyio.run(grp.run, style, CLICommandCBOnRecv(), backend=actual_backend, backend_options=actual_backend_opts)
         else:
             raise typer.BadParameter("Invalid processing strategy")  # pragma: no cover
         if grp.status != CommandStatus.SUCCESS:
@@ -361,11 +374,8 @@ try:
         elif command == WebCommand.STATUS:
             get_web_server_status()
         else:
-            typer.echo(f"Not a valid command '{command}'", err=True)
-            raise typer.Abort()
+            typer.echo(f"Not a valid command '{command}'", err=True)  # pragma: no cover
+            raise typer.Abort()  # pragma: no cover
 
 except ImportError:  # pragma: no cover
     pass  # pragma: no cover
-
-if __name__ == "__main__":
-    cli_app()

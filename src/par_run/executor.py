@@ -10,8 +10,11 @@ from pathlib import Path
 from typing import Any, Optional, Protocol, Union, cast
 
 import anyio
+import anyio.to_thread
 import tomlkit
 from pydantic import BaseModel, ConfigDict, Field
+
+internal_error_ret_code = 999
 
 
 class ProcessingStrategy(enum.Enum):
@@ -29,10 +32,11 @@ class CommandStatus(enum.Enum):
     SUCCESS = "Success"
     FAILURE = "Failure"
     TIMEOUT = "Timeout"
+    CANCELLED = "Cancelled"
 
     def completed(self) -> bool:
         """Return True if the command has completed."""
-        return self in [CommandStatus.SUCCESS, CommandStatus.FAILURE, CommandStatus.TIMEOUT]
+        return self in [CommandStatus.SUCCESS, CommandStatus.FAILURE, CommandStatus.TIMEOUT, CommandStatus.CANCELLED]
 
 
 class Command(BaseModel):
@@ -79,12 +83,17 @@ class Command(BaseModel):
         self.status = CommandStatus.TIMEOUT
         if self.start_time:
             self.elapsed = time.perf_counter() - self.start_time
-        self.ret_code = 999
+        self.ret_code = internal_error_ret_code
 
     def set_running(self) -> None:
         """Set the command status to running."""
         self.start_time = time.perf_counter()
         self.status = CommandStatus.RUNNING
+
+    def set_cancelled(self) -> None:
+        """Set the command status to cancelled."""
+        self.status = CommandStatus.CANCELLED
+        self.ret_code = internal_error_ret_code
 
 
 class CommandCB(Protocol):
@@ -111,18 +120,18 @@ class CommandGroup(BaseModel):
         else:
             self.status = CommandStatus.FAILURE
 
-    async def run_serial(self, strategy: ProcessingStrategy, callbacks: CommandCB) -> None:
+    async def run_serial(self, callbacks: CommandCB) -> None:
         try:
             for ix in range(len(self.cmds.values())):
                 cmd = list(self.cmds.values())[ix]
                 cmd.set_running()
-                await self._run_command(cmd, strategy, callbacks)
+                async with anyio.create_task_group() as nursery:
+                    nursery.start_soon(self._run_command, cmd, ProcessingStrategy.ON_RECV, callbacks)
                 if cmd.status != CommandStatus.SUCCESS and not self.cont_on_fail:
-                    # Fail all remaining cmds
+                    # Cancel all remaining cmds
                     for jx in range(ix + 1, len(self.cmds.values())):
                         cmd = list(self.cmds.values())[jx]
-                        cmd.set_ret_code(999)
-                        await callbacks.on_term(cmd, 999)
+                        cmd.set_cancelled()
                     self.update_status(self.cmds)
                     break
         except Exception as _:
@@ -143,7 +152,7 @@ class CommandGroup(BaseModel):
 
     async def run(self, strategy: ProcessingStrategy, callbacks: CommandCB) -> None:
         if self.serial:
-            await self.run_serial(strategy, callbacks)
+            await self.run_serial(callbacks)
         else:
             await self.run_parallel(strategy, callbacks)
 
@@ -159,8 +168,7 @@ class CommandGroup(BaseModel):
     async def _process_stdxxx(
         self, cmd: Command, strategy: ProcessingStrategy, stream: AsyncIterable[bytes], callbacks: CommandCB
     ) -> None:
-        if strategy == ProcessingStrategy.ON_RECV:
-            await callbacks.on_start(cmd)
+        await callbacks.on_start(cmd)
 
         incomplete_line = ""
 
@@ -180,7 +188,6 @@ class CommandGroup(BaseModel):
             await self._proces_stdxx_line(cmd, incomplete_line, strategy, callbacks)  # pragma: no cover
 
         if strategy == ProcessingStrategy.ON_COMP:
-            await callbacks.on_start(cmd)
             for _ix, line in enumerate(cmd.unflushed):
                 await callbacks.on_recv(cmd, line)
             cmd.clear_unflushed()
@@ -204,8 +211,8 @@ class CommandGroup(BaseModel):
                     await process.wait()
         except TimeoutError:
             cmd.set_timeout()
-            await callbacks.on_term(cmd, 999)
-            return 999
+            await callbacks.on_term(cmd, internal_error_ret_code)
+            return internal_error_ret_code
         else:
             exit_code = cast(int, process.returncode)
             cmd.set_ret_code(exit_code)
