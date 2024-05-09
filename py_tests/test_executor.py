@@ -213,7 +213,7 @@ def test_validate_mandatory_keys_missing_key() -> None:
     keys = ["key1", "key2", "key3"]
     context = "test_context"
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError, match="key2 is mandatory, not found in test_context") as exc_info:
         _validate_mandatory_keys(data, keys, context)
 
     assert str(exc_info.value) == "key2 is mandatory, not found in test_context"
@@ -267,8 +267,8 @@ def test_read_commands_toml(filename: str) -> None:
             assert cmd.cmd
 
     # Test case 2: Invalid commands.toml file
+    filename = "invalid_commands.toml"
     with pytest.raises(FileNotFoundError):
-        filename = "invalid_commands.toml"
         read_commands_toml(filename)
 
 
@@ -282,8 +282,8 @@ desc = "par-run from pyproject.toml"
     toml_file = tmp_path / "test_commands.toml"
     toml_file.write_text(toml_content)
 
-    # Call the function and assert that it raises a ValueError
-    with pytest.raises(ValueError):
+    # Call the function and assert that it raises a ValueError with a specific error message
+    with pytest.raises(ValueError, match="No par-run data found in toml file"):
         read_commands_toml(toml_file)
 
 

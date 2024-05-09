@@ -49,7 +49,8 @@ def start_web_server(port: int) -> None:
         while time.time_ns() - start_time < wait_time:
             test_port = get_process_port(process.pid)
             if port == test_port:
-                typer.echo(f"UVicorn server is running on port {port} in {(time.time_ns() - start_time)/10**6:.2f} ms.")
+                elapsed_time = (time.time_ns() - start_time) / 10**6
+                typer.echo(f"UVicorn server is running on port {port} in {elapsed_time:.2f} ms.")
                 typer.echo(f"Server running at http://localhost:{port}/")
                 break
             time.sleep(0.1)  # Poll every 0.1 seconds
@@ -202,7 +203,9 @@ def show_commands(groups: list[CommandGroup]) -> None:
 
 
 def filter_groups(
-    group_list: list[CommandGroup], filter_groups: Optional[str], filter_cmds: Optional[str]
+    group_list: list[CommandGroup],
+    filter_groups: Optional[str],
+    filter_cmds: Optional[str],
 ) -> list[CommandGroup]:
     if filter_groups:
         group_list = [grp for grp in group_list if grp.name in [g.strip() for g in filter_groups.split(",")]]

@@ -17,7 +17,14 @@ def cmd_group_ids(vals: tuple[int, list[int], list[int], list[bool], list[bool]]
     serial_str = str(any(serial))
     success_str = str(all(success))
     num_output_lines_str = str(mean(num_output_lines))
-    return f"{num_groups}_groups_{len(num_cmds)}_cmds_{len(num_output_lines)}_outputs_{num_output_lines_str}_serial_{serial_str}_success_{success_str}"
+    return (
+        f"{num_groups}_groups_"
+        f"{len(num_cmds)}_cmds_"
+        f"{len(num_output_lines)}_outputs_"
+        f"{num_output_lines_str}_serial_"
+        f"{serial_str}_success_"
+        f"{success_str}"
+    )
 
 
 @pytest.fixture(
@@ -70,12 +77,14 @@ def _norm_generate_command_groups(  # noqa: PLR0912
 
     Args:
         num_groups (int): Number of groups to generate
-        num_cmds (Union[int, list[int]]): Number of commands in each group, or a list of the number of commands in each group. Must be the same length as num_groups
+        num_cmds (Union[int, list[int]]): Number of commands in each group, or a list of the number of commands
+            in each group. Must be the same length as num_groups
         num_output_lines (Union[int, list[int]]): Number of output lines for each command,
           or a list of the number of output lines for each command. Must be the same length as num_cmds*num_groups
-        serial (Union[bool, list[bool]]): Whether each group should run serially or in parallel, each group must be a bool or a list of bools the same length as num_cmds*num_groups
-        success (Union[bool, list[bool]]): Whether each command should succeed or fail, each command must be a bool or a list of bools the same length as num_cmds*num_groups
-
+        serial (Union[bool, list[bool]]): Whether each group should run serially or in parallel, each group must be
+            a bool or a list of bools the same length as num_cmds*num_groups
+        success (Union[bool, list[bool]]): Whether each command should succeed or fail, each command must be a bool
+            or a list of bools the same length as num_cmds*num_groups
 
     Returns:
         tuple[int, list[int], list[int], list[bool], list[bool]]: _description_
@@ -124,7 +133,11 @@ def generate_command_groups(
     success: Union[bool, list[bool]],
 ) -> CommandGroup:
     num_groups, num_cmds, num_output_lines, serial, success = _norm_generate_command_groups(
-        num_groups, num_cmds, num_output_lines, serial, success
+        num_groups,
+        num_cmds,
+        num_output_lines,
+        serial,
+        success,
     )
 
     echo = "Hello, World!"
@@ -145,7 +158,7 @@ def generate_command_groups(
     params=[
         pytest.param(("asyncio", {"use_uvloop": True}), id="asyncio+uvloop"),
         pytest.param(("asyncio", {"use_uvloop": False}), id="asyncio"),
-    ]
+    ],
 )
 def anyio_backend(request: pytest.FixtureRequest) -> AnyIOBackendT:
     return request.param  # type: ignore
@@ -156,7 +169,7 @@ def anyio_backend(request: pytest.FixtureRequest) -> AnyIOBackendT:
         pytest.param(("asyncio", {"use_uvloop": True}), id="asyncio+uvloop"),
         pytest.param(("asyncio", {"use_uvloop": False}), id="asyncio"),
         pytest.param(("trio", {}), id="trio"),
-    ]
+    ],
 )
 def anyio_backend_asyncio(request: pytest.FixtureRequest) -> tuple[str, dict[str, Any]]:
     return request.param

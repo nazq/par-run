@@ -15,12 +15,12 @@ from .conftest import AnyIOBackendT
 
 @pytest.fixture()
 def test_client(anyio_backend: AnyIOBackendT) -> Generator[TestClient, None, None]:
-    yield TestClient(ws_app, backend=anyio_backend[0], backend_options=anyio_backend[1])
+    return TestClient(ws_app, backend=anyio_backend[0], backend_options=anyio_backend[1])
 
 
 @pytest.fixture()
 def async_client() -> Generator[AsyncClient, None, None]:
-    yield AsyncClient(app=ws_app, base_url="http://test")
+    return AsyncClient(app=ws_app, base_url="http://test")
 
 
 def test_ws_main() -> None:
