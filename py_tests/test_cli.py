@@ -395,6 +395,7 @@ def test_enums() -> None:
         assert isinstance(backend.value, str)
         assert str(backend) == backend.value
 
+
 @pytest.mark.anyio()
 async def test_command_cb_comp_success(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
