@@ -13,16 +13,6 @@ from par_run.web import ws_app
 from .conftest import AnyIOBackendT
 
 
-@pytest.fixture(
-    params=[
-        pytest.param(("asyncio", {"use_uvloop": True}), id="asyncio+uvloop"),
-        pytest.param(("asyncio", {"use_uvloop": False}), id="asyncio"),
-    ]
-)
-def anyio_backend(request: pytest.FixtureRequest) -> AnyIOBackendT:
-    return request.param  # type: ignore
-
-
 @pytest.fixture()
 def test_client(anyio_backend: AnyIOBackendT) -> Generator[TestClient, None, None]:
     yield TestClient(ws_app, backend=anyio_backend[0], backend_options=anyio_backend[1])
