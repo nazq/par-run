@@ -14,12 +14,16 @@ anyio==4.3.0
     # via par-run
     # via starlette
     # via watchfiles
+attrs==23.2.0
+    # via outcome
+    # via trio
 click==8.1.7
     # via typer
     # via uvicorn
 exceptiongroup==1.2.1
     # via anyio
     # via par-run
+    # via trio
 fastapi==0.110.1
     # via par-run
 h11==0.14.0
@@ -28,6 +32,7 @@ httptools==0.6.1
     # via uvicorn
 idna==3.7
     # via anyio
+    # via trio
 jinja2==3.1.3
     # via par-run
 markdown-it-py==3.0.0
@@ -36,6 +41,8 @@ markupsafe==2.1.5
     # via jinja2
 mdurl==0.1.2
     # via markdown-it-py
+outcome==1.3.0.post0
+    # via trio
 psutil==5.9.8
     # via par-run
 pydantic==2.7.0
@@ -56,10 +63,15 @@ shellingham==1.5.4
     # via typer
 sniffio==1.3.1
     # via anyio
+    # via trio
+sortedcontainers==2.4.0
+    # via trio
 starlette==0.37.2
     # via fastapi
 tomlkit==0.12.4
     # via par-run
+trio==0.25.0
+    # via anyio
 typer==0.12.3
     # via par-run
 typing-extensions==4.11.0

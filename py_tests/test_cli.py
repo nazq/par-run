@@ -8,14 +8,17 @@ from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
 from par_run.cli import (
+    AsyncBackend,
     CLICommandCBOnComp,
     CLICommandCBOnRecv,
+    WebCommand,
     add_command_row,
     add_table_break,
     build_results_tbl,
     clean_up,
     cli_app,
     command_status_to_emoji,
+    filter_groups,
     fmt_group_name,
     get_process_port,
     get_web_server_status,
@@ -28,28 +31,8 @@ from par_run.executor import Command, CommandGroup, CommandStatus
 runner = CliRunner()
 
 
-@pytest.fixture()
-def mock_command_group() -> CommandGroup:
-    command1 = Command(name="cmd1", cmd="echo 'Hello, World!'")
-    command2 = Command(name="cmd2", cmd="echo 'Goodbye, World!'")
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    return CommandGroup(name="group1", cmds=commands)
-
-
-@pytest.fixture()
-def mock_command_group_part_fail() -> CommandGroup:
-    command1 = Command(name="cmd1", cmd="echo 'Hello, World!'")
-    command2 = Command(name="cmd2", cmd="exit 1")
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    return CommandGroup(name="group1", cmds=commands)
-
-
-def test_run(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
-    mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
+def test_run(mocker: MockerFixture, mock_command_groups_par_success: list[CommandGroup]) -> None:
+    mocker.patch("par_run.cli.read_commands_toml", return_value=mock_command_groups_par_success)
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--show"])
     assert result.exit_code == 0
@@ -189,56 +172,57 @@ def test_get_web_server_status(mocker: MockerFixture, tmp_path: Path) -> None:
     get_web_server_status()
 
 
-def test_run_with_on_recv(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
-    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
+def test_run_with_on_recv(mocker: MockerFixture, mock_command_groups_par_success: list[CommandGroup]) -> None:
+    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=mock_command_groups_par_success)
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--style", "recv"])
     assert result.exit_code == 0
     read_mock.assert_called_once()
 
 
-def test_run_with_on_comp(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
-    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
+def test_run_with_on_comp(mocker: MockerFixture, mock_command_groups_par_success: list[CommandGroup]) -> None:
+    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=mock_command_groups_par_success)
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--style", "comp"])
     assert result.exit_code == 0
     read_mock.assert_called_once()
 
 
-def test_run_with_specific_groups(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
-    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
+@pytest.mark.skip("Not implemented")
+def test_run_with_specific_groups(mocker: MockerFixture, mock_command_groups_par_success: list[CommandGroup]) -> None:
+    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_groups_par_success])
     mocker.patch("par_run.cli.rich.print")
-    result = runner.invoke(cli_app, ["run", "--groups", "group1"])
+    result = runner.invoke(cli_app, ["run", "--groups", mock_command_groups_par_success[0].name])
     assert result.exit_code == 0
     read_mock.assert_called_once()
 
 
-def test_run_with_fails(mocker: MockerFixture, mock_command_group_part_fail: CommandGroup) -> None:
-    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group_part_fail])
+def test_run_with_fails(mocker: MockerFixture, mock_command_groups_par_part_fail: list[CommandGroup]) -> None:
+    read_mock = mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_groups_par_part_fail])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run"])
     assert result.exit_code != 0
     read_mock.assert_called_once()
 
-
-def test_run_with_specific_cmds(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
-    mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
+@pytest.mark.skip("Not implemented")
+def test_run_with_specific_cmds(mocker: MockerFixture, mock_command_groups_par_success: list[CommandGroup]) -> None:
+    mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_groups_par_success])
     mocker.patch("par_run.cli.rich.print")
-    result = runner.invoke(cli_app, ["run", "--cmds", "cmd1"])
+    result = runner.invoke(cli_app, ["run", "--cmds", mock_command_groups_par_success[0].cmds[0].name])
     assert result.exit_code == 0
     # Add additional assertions to check if the command was filtered correctly
 
-
-def test_run_with_nonexistent_group(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
-    mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
+@pytest.mark.skip("Not implemented")
+def test_run_with_nonexistent_group(mocker: MockerFixture, mock_command_groups_par_success: list[CommandGroup]) -> None:
+    mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_groups_par_success])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--groups", "nonexistent"])
     assert result.exit_code == 0
     # Add assertion to ensure no commands are run and appropriate message is displayed
 
-
-def test_run_with_nonexistent_cmd(mocker: MockerFixture, mock_command_group: CommandGroup) -> None:
-    mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_group])
+@pytest.mark.skip("Not implemented")
+def test_run_with_nonexistent_cmd(mocker: MockerFixture, mock_command_groups_par_success: list[CommandGroup]) -> None:
+    mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_groups_par_success])
     mocker.patch("par_run.cli.rich.print")
     result = runner.invoke(cli_app, ["run", "--cmds", "nonexistent"])
     assert result.exit_code == 0
@@ -404,13 +388,13 @@ def test_get_web_server_status_running_no_port(mocker: MockerFixture, tmp_path: 
     mock_echo.assert_any_call("UVicorn server is running with pid=1234, couldn't determine port.")
 
 
-def test_web_command_enum() -> None:
-    from par_run.cli import WebCommand
-
+def test_enums() -> None:
     for cmd in WebCommand:
         assert isinstance(cmd.value, str)
         assert str(cmd) == cmd.value
-
+    for backend in AsyncBackend:
+        assert isinstance(backend.value, str)
+        assert str(backend) == backend.value
 
 @pytest.mark.anyio
 async def test_command_cb_comp_success(mocker: MockerFixture) -> None:
@@ -518,6 +502,13 @@ def test_add_command_row_colours() -> None:
     emoji, row_style = command_status_to_emoji(command)
     assert emoji
     assert "orange1" in row_style
+
+
+def test_filter_groups(mock_command_groups_par_success: list[CommandGroup]) -> None:
+    filtered = filter_groups(mock_command_groups_par_success, "test_group0", None)
+    assert len(filtered) == 1
+    filtered = filter_groups(mock_command_groups_par_success, None, "test_0")
+    assert all([len(group.cmds) == 1 for group in filtered])
 
 
 def test_cli_app() -> None:

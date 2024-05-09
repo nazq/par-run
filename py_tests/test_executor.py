@@ -1,6 +1,5 @@
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any
 
 import anyio
 import pytest
@@ -21,37 +20,11 @@ from par_run.executor import (
 from py_tests.conftest import AnyIOBackendT
 
 
-def test_command_incr_line_count() -> None:
-    command = Command(name="test", cmd="echo 'Hello, World!'")
-    assert command.num_non_empty_lines == 0
+class CommanCBTest:
+    def __init__(self) -> None:
+        self.output = []
+        self.exit_code = 0
 
-    command.incr_line_count("Hello, World!")
-    assert command.num_non_empty_lines == 1
-
-    command.incr_line_count("")
-    assert command.num_non_empty_lines == 1
-
-
-def test_command_append_unflushed() -> None:
-    command = Command(name="test", cmd="echo 'Hello, World!'")
-    assert command.unflushed == []
-
-    command.append_unflushed("Hello, World!")
-    assert command.unflushed == ["Hello, World!"]
-
-    command.append_unflushed("")
-    assert command.unflushed == ["Hello, World!", ""]
-
-
-def test_command_set_running() -> None:
-    command = Command(name="test", cmd="echo 'Hello, World!'")
-    assert command.status == CommandStatus.NOT_STARTED
-
-    command.set_running()
-    assert command.status == CommandStatus.RUNNING  # type: ignore
-
-
-class TestCommandCB:
     async def on_start(self, cmd: Command) -> None:
         assert cmd
         assert cmd.name.startswith("test")
@@ -60,6 +33,7 @@ class TestCommandCB:
         assert cmd
         assert cmd.name.startswith("test")
         assert output is not None
+        self.output.append(output)
 
     async def on_term(self, cmd: Command, exit_code: int) -> None:
         assert cmd
@@ -73,112 +47,78 @@ class TestCommandCB:
         elif cmd.status == CommandStatus.FAILURE:
             assert cmd.status.completed()
             assert cmd.ret_code != 0
+        self.exit_code = exit_code
 
 
-def test_command_group_parallel(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
-    command1 = Command(name="test1", cmd="echo 'Hello, World!'", passenv=["PATH"])
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'", setenv={"TEST": "test"})
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands)
-    anyio.run(group.run, ProcessingStrategy.ON_COMP, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
-    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
-    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+def test_command_set_running() -> None:
+    command = Command(name="test", cmd="echo 'Hello, World!'")
+    assert command.status == CommandStatus.NOT_STARTED
 
-    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'")
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands)
-    anyio.run(group.run, ProcessingStrategy.ON_RECV, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
-    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
-    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+    command.set_running()
+    assert command.status == CommandStatus.RUNNING  # type: ignore
 
 
-def test_command_group_serial(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
-    command1 = Command(name="test1", cmd="echo 'Hello, World!'", passenv=["PATH"])
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'", setenv={"TEST": "test"})
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands, serial=True)
-    anyio.run(group.run, ProcessingStrategy.ON_COMP, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
-    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
-    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
-
-    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'")
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands)
-    anyio.run(group.run, ProcessingStrategy.ON_RECV, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
-    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
-    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+@pytest.mark.parametrize("style", [ProcessingStrategy.ON_COMP, ProcessingStrategy.ON_RECV])
+def test_command_group_parallel(
+    anyio_backend: AnyIOBackendT,  # noqa: ARG001
+    mock_command_groups_par_success: list[CommandGroup],
+    style: ProcessingStrategy,
+) -> None:
+    for group in mock_command_groups_par_success:
+        cb = CommanCBTest()
+        anyio.run(group.run, style, cb)
+        assert all(cmd.status.completed() for cmd in group.cmds.values())
+        assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+        assert all(cmd.num_non_empty_lines == cmd.cmd.count("echo") for cmd in group.cmds.values())
+        assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+        assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
+        assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
 
 
-def test_command_group_serial_part_fail(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
-    command1 = Command(name="test1", cmd="echo 'Hello, World!' && exit 1", passenv=["PATH"])
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'", setenv={"TEST": "test"})
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands, serial=True)
-
-    anyio.run(group.run, ProcessingStrategy.ON_COMP, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert command1.ret_code == 1
-    assert command2.ret_code == internal_err_ret_code
-    assert command1.status == CommandStatus.FAILURE
-    assert command2.status == CommandStatus.CANCELLED
-    assert command1.num_non_empty_lines == 1
-    assert command2.num_non_empty_lines == 0
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
-
-    command1 = Command(name="test1", cmd="echo 'Hello, World!' && exit 1")
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'")
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands, serial=True)
-    anyio.run(group.run, ProcessingStrategy.ON_RECV, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert command1.ret_code == 1
-    assert command2.ret_code == internal_err_ret_code
-    assert command1.status == CommandStatus.FAILURE
-    assert command2.status == CommandStatus.CANCELLED
-    assert command1.num_non_empty_lines == 1
-    assert command2.num_non_empty_lines == 0
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+@pytest.mark.parametrize("style", [ProcessingStrategy.ON_COMP, ProcessingStrategy.ON_RECV])
+def test_command_group_serial(
+    anyio_backend: AnyIOBackendT,  # noqa: ARG001
+    mock_command_groups_serial_success: list[CommandGroup],
+    style: ProcessingStrategy,
+) -> None:
+    for group in mock_command_groups_serial_success:
+        cb = CommanCBTest()
+        anyio.run(group.run, style, cb)
+        assert all(cmd.status.completed() for cmd in group.cmds.values())
+        assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+        assert all(cmd.num_non_empty_lines == cmd.cmd.count("echo") for cmd in group.cmds.values())
+        assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+        assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
+        assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
 
 
-@pytest.fixture(
-    params=[
-        pytest.param(("asyncio", {"use_uvloop": True}), id="asyncio+uvloop"),
-        pytest.param(("asyncio", {"use_uvloop": False}), id="asyncio"),
-        pytest.param(("trio", {}), id="trio"),
-    ]
-)
-def anyio_backend_asyncio(request: pytest.FixtureRequest) -> tuple[str, dict[str, Any]]:
-    return request.param
+@pytest.mark.parametrize("style", [ProcessingStrategy.ON_COMP, ProcessingStrategy.ON_RECV])
+def test_command_group_serial_part_fail(
+    anyio_backend: AnyIOBackendT,  # noqa: ARG001
+    mock_command_groups_par_part_fail: list[CommandGroup],
+    style: ProcessingStrategy,
+) -> None:
+    for group in mock_command_groups_par_part_fail:
+        cb = CommanCBTest()
+
+        anyio.run(group.run, style, cb)
+        assert all(cmd.status.completed() for cmd in group.cmds.values())
+
+        fail_ix = -1
+        for ix, cmd in enumerate(group.cmds.values()):
+            if cmd.status == CommandStatus.SUCCESS:
+                assert cmd.ret_code == 0
+                assert cmd.num_non_empty_lines == cmd.cmd.count("echo")
+            elif cmd.status == CommandStatus.FAILURE:
+                fail_ix = ix
+                assert cmd.ret_code != 0
+                assert cmd.num_non_empty_lines == cmd.cmd.count("echo")
+            else:
+                assert ix > fail_ix
+                assert cmd.ret_code == internal_err_ret_code
+                assert cmd.num_non_empty_lines == 0
+
+        assert all(cmd.unflushed == [] for cmd in group.cmds.values())
 
 
 def test_command_group_timeout_on_recv(anyio_backend_asyncio) -> None:  # noqa: ARG001, ANN001
@@ -186,7 +126,7 @@ def test_command_group_timeout_on_recv(anyio_backend_asyncio) -> None:  # noqa: 
     commands = OrderedDict()
     commands[command1.name] = command1
     group = CommandGroup(name="test_group", cmds=commands, timeout=1)
-    anyio.run(group.run, ProcessingStrategy.ON_RECV, TestCommandCB())
+    anyio.run(group.run, ProcessingStrategy.ON_RECV, CommanCBTest())
 
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code == internal_err_ret_code for cmd in group.cmds.values())
@@ -200,7 +140,7 @@ def test_command_group_timeout_on_comp(anyio_backend_asyncio) -> None:  # noqa: 
     commands = OrderedDict()
     commands[command1.name] = command1
     group = CommandGroup(name="test_group", cmds=commands, timeout=1)
-    anyio.run(group.run, ProcessingStrategy.ON_COMP, TestCommandCB())
+    anyio.run(group.run, ProcessingStrategy.ON_COMP, CommanCBTest())
     timeout_ret_code = 999
     assert all(cmd.status.completed() for cmd in group.cmds.values())
     assert all(cmd.ret_code == timeout_ret_code for cmd in group.cmds.values())
@@ -209,96 +149,47 @@ def test_command_group_timeout_on_comp(anyio_backend_asyncio) -> None:  # noqa: 
     assert all(cmd.status == CommandStatus.TIMEOUT for cmd in group.cmds.values())
 
 
-def test_command_group_part_fail(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
-    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'; exit 1")
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands)
-    anyio.run(group.run, ProcessingStrategy.ON_COMP, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
-    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
-    assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
-    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
-
-    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'; exit 1")
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands)
-    anyio.run(group.run, ProcessingStrategy.ON_RECV, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
-    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
-    assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
-    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
+@pytest.mark.parametrize("style", [ProcessingStrategy.ON_COMP, ProcessingStrategy.ON_RECV])
+async def test_command_group_async(
+    anyio_backend: AnyIOBackendT,  # noqa: ARG001
+    mock_command_groups_par_success: list[CommandGroup],
+    style: ProcessingStrategy,
+) -> None:
+    for group in mock_command_groups_par_success:
+        cb = CommanCBTest()
+        await group.run(style, cb)
+        assert all(cmd.status.completed() for cmd in group.cmds.values())
+        assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+        assert all(cmd.num_non_empty_lines == cmd.cmd.count("echo") for cmd in group.cmds.values())
+        assert all(cmd.unflushed == [] for cmd in group.cmds.values())
+        assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
+        assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
 
 
-async def test_command_group_async(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
-    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'")
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands)
-    await group.run(ProcessingStrategy.ON_COMP, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
-    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
-    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
+@pytest.mark.parametrize("style", [ProcessingStrategy.ON_COMP, ProcessingStrategy.ON_RECV])
+async def test_command_group_async_part_fail(
+    anyio_backend: AnyIOBackendT,  # noqa: ARG001
+    mock_command_groups_par_part_fail: list[CommandGroup],
+    style: ProcessingStrategy,
+) -> None:
+    for group in mock_command_groups_par_part_fail:
+        cb = CommanCBTest()
+        await group.run(style, cb)
+        fail_ix = -1
+        for ix, cmd in enumerate(group.cmds.values()):
+            if cmd.status == CommandStatus.SUCCESS:
+                assert cmd.ret_code == 0
+                assert cmd.num_non_empty_lines == cmd.cmd.count("echo")
+            elif cmd.status == CommandStatus.FAILURE:
+                fail_ix = ix
+                assert cmd.ret_code != 0
+                assert cmd.num_non_empty_lines == cmd.cmd.count("echo")
+            else:
+                assert ix > fail_ix
+                assert cmd.ret_code == internal_err_ret_code
+                assert cmd.num_non_empty_lines == 0
 
-    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'")
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands)
-    await group.run(ProcessingStrategy.ON_RECV, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
-    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
-    assert all(cmd.status == CommandStatus.SUCCESS for cmd in group.cmds.values())
-    assert all(cmd.ret_code == 0 for cmd in group.cmds.values())
-
-
-async def test_command_group_async_part_fail(anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001, ANN001
-    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'; exit 1")
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands)
-    await group.run(ProcessingStrategy.ON_COMP, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
-    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
-    assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
-    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
-    assert group.status == CommandStatus.FAILURE
-
-    command1 = Command(name="test1", cmd="echo 'Hello, World!'")
-    command2 = Command(name="test2", cmd="echo 'World, Hey!'; exit 1")
-    commands = OrderedDict()
-    commands[command1.name] = command1
-    commands[command2.name] = command2
-    group = CommandGroup(name="test_group", cmds=commands)
-    await group.run(ProcessingStrategy.ON_RECV, TestCommandCB())
-    assert all(cmd.status.completed() for cmd in group.cmds.values())
-    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
-    assert all(cmd.num_non_empty_lines == 1 for cmd in group.cmds.values())
-    assert all(cmd.unflushed == [] for cmd in group.cmds.values())
-    assert all(cmd.status in [CommandStatus.SUCCESS, CommandStatus.FAILURE] for cmd in group.cmds.values())
-    assert all(cmd.ret_code in [0, 1] for cmd in group.cmds.values())
-    assert group.status == CommandStatus.FAILURE
+        assert all(cmd.unflushed == [] for cmd in group.cmds.values())
 
 
 def test_validate_mandatory_keys() -> None:
