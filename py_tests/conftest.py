@@ -86,7 +86,6 @@ def _norm_generate_command_groups(  # noqa: PLR0912
         success (Union[bool, list[bool]]): Whether each command should succeed or fail, each command must be a bool
             or a list of bools the same length as num_cmds*num_groups
 
-
     Returns:
         tuple[int, list[int], list[int], list[bool], list[bool]]: _description_
     """
