@@ -38,8 +38,8 @@ def test_run(mocker: MockerFixture, mock_command_groups_par_success: list[Comman
     assert result.exit_code == 0
 
 
-@pytest.mark.anyio
-async def test_CLICommandCB_on_start(mocker: MockerFixture) -> None:
+@pytest.mark.anyio()
+async def test_on_start(mocker: MockerFixture) -> None:
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
@@ -47,8 +47,8 @@ async def test_CLICommandCB_on_start(mocker: MockerFixture) -> None:
     mock_rich_print.assert_called_once()
 
 
-@pytest.mark.anyio
-async def test_CLICommandCB_on_recv(mocker: MockerFixture) -> None:
+@pytest.mark.anyio()
+async def test_on_recv(mocker: MockerFixture) -> None:
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
@@ -56,9 +56,9 @@ async def test_CLICommandCB_on_recv(mocker: MockerFixture) -> None:
     mock_rich_print.assert_called_once_with("Hello, World!")
 
 
-@pytest.mark.anyio
+@pytest.mark.anyio()
 @pytest.mark.parametrize("status", [CommandStatus.SUCCESS, CommandStatus.FAILURE])
-async def test_CLICommandCB_on_term(mocker: MockerFixture, status: CommandStatus) -> None:
+async def test_on_term(mocker: MockerFixture, status: CommandStatus) -> None:
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
     command = Command(name="cmd1", cmd="echo 'Hello'")
@@ -116,7 +116,6 @@ def test_start_web_server_running(mocker: MockerFixture, tmp_path: Path) -> None
     time_ns_side_effect = itertools.chain([start_ns, start_ns + 1], itertools.repeat(start_ns + 2 * 10**9))
     mocker.patch("par_run.cli.time.time_ns", side_effect=time_ns_side_effect)
 
-    # Setup: Mock get_process_port to return the correct port after the first loop iteration, ensuring it doesn't run out of values
     get_process_port_side_effect = itertools.chain(
         [None, 8000],
         itertools.repeat(8000),
@@ -204,6 +203,7 @@ def test_run_with_fails(mocker: MockerFixture, mock_command_groups_par_part_fail
     assert result.exit_code != 0
     read_mock.assert_called_once()
 
+
 @pytest.mark.skip("Not implemented")
 def test_run_with_specific_cmds(mocker: MockerFixture, mock_command_groups_par_success: list[CommandGroup]) -> None:
     mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_groups_par_success])
@@ -212,6 +212,7 @@ def test_run_with_specific_cmds(mocker: MockerFixture, mock_command_groups_par_s
     assert result.exit_code == 0
     # Add additional assertions to check if the command was filtered correctly
 
+
 @pytest.mark.skip("Not implemented")
 def test_run_with_nonexistent_group(mocker: MockerFixture, mock_command_groups_par_success: list[CommandGroup]) -> None:
     mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_groups_par_success])
@@ -219,6 +220,7 @@ def test_run_with_nonexistent_group(mocker: MockerFixture, mock_command_groups_p
     result = runner.invoke(cli_app, ["run", "--groups", "nonexistent"])
     assert result.exit_code == 0
     # Add assertion to ensure no commands are run and appropriate message is displayed
+
 
 @pytest.mark.skip("Not implemented")
 def test_run_with_nonexistent_cmd(mocker: MockerFixture, mock_command_groups_par_success: list[CommandGroup]) -> None:
@@ -362,9 +364,6 @@ def test_list_uvicorn_processes_with_exceptions(mocker: MockerFixture) -> None:
     # Since all processes raise exceptions, the output should indicate no UVicorn processes found
     mock_echo.assert_any_call("No other UVicorn processes found.")
 
-    # Optionally, assert that the exceptions were caught and did not cause the function to fail
-    # This can be inferred from the fact that the function executed to completion and made the expected call to mock_echo
-
 
 def test_get_web_server_status_running_no_port(mocker: MockerFixture, tmp_path: Path) -> None:
     # Setup: Create a temporary PID file with a mock PID
@@ -396,7 +395,8 @@ def test_enums() -> None:
         assert isinstance(backend.value, str)
         assert str(backend) == backend.value
 
-@pytest.mark.anyio
+
+@pytest.mark.anyio()
 async def test_command_cb_comp_success(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
@@ -407,7 +407,7 @@ async def test_command_cb_comp_success(mocker: MockerFixture) -> None:
     await cb.on_term(command, 0)
 
 
-@pytest.mark.anyio
+@pytest.mark.anyio()
 async def test_command_cb_comp_fail(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
@@ -418,7 +418,7 @@ async def test_command_cb_comp_fail(mocker: MockerFixture) -> None:
     await cb.on_term(command, 1)
 
 
-@pytest.mark.anyio
+@pytest.mark.anyio()
 async def test_command_cb_recv_success(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnRecv()
@@ -429,7 +429,7 @@ async def test_command_cb_recv_success(mocker: MockerFixture) -> None:
     await cb.on_term(command, 0)
 
 
-@pytest.mark.anyio
+@pytest.mark.anyio()
 async def test_command_cb_recv_fail(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnRecv()
@@ -446,7 +446,7 @@ def test_results_table() -> None:
     assert tbl is not None
     assert len(tbl.columns) == len(cols)
     tbl_cols = [col.header for col in tbl.columns]
-    assert all([col in tbl_cols for col in cols])
+    assert all(col in tbl_cols for col in cols)
     command = Command(name="cmd1", cmd="echo 'Hello'")
     add_command_row(tbl, command, "group1")
     add_table_break(tbl)
@@ -508,10 +508,9 @@ def test_filter_groups(mock_command_groups_par_success: list[CommandGroup]) -> N
     filtered = filter_groups(mock_command_groups_par_success, "test_group0", None)
     assert len(filtered) == 1
     filtered = filter_groups(mock_command_groups_par_success, None, "test_0")
-    assert all([len(group.cmds) == 1 for group in filtered])
+    assert all(len(group.cmds) == 1 for group in filtered)
 
 
 def test_cli_app() -> None:
     with pytest.raises(SystemExit):
-        app = cli_app(["--help"])
-        assert app
+        assert cli_app(["--help"])

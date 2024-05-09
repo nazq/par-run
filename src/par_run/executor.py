@@ -134,7 +134,7 @@ class CommandGroup(BaseModel):
                         cmd.set_cancelled()
                     self.update_status(self.cmds)
                     break
-        except Exception as _:
+        except Exception as _:  # noqa: BLE001
             self.status = CommandStatus.FAILURE
         else:
             self.update_status(self.cmds)
@@ -145,7 +145,7 @@ class CommandGroup(BaseModel):
                 for cmd in self.cmds.values():
                     nursery.start_soon(self._run_command, cmd, strategy, callbacks)
                     cmd.set_running()
-        except Exception as _:
+        except Exception as _:  # noqa: BLE001
             self.status = CommandStatus.FAILURE
         else:
             self.update_status(self.cmds)
@@ -157,7 +157,11 @@ class CommandGroup(BaseModel):
             await self.run_parallel(strategy, callbacks)
 
     async def _proces_stdxx_line(
-        self, cmd: Command, line: str, strategy: ProcessingStrategy, callbacks: CommandCB
+        self,
+        cmd: Command,
+        line: str,
+        strategy: ProcessingStrategy,
+        callbacks: CommandCB,
     ) -> None:
         if strategy == ProcessingStrategy.ON_RECV:
             await callbacks.on_recv(cmd, line)
@@ -166,7 +170,11 @@ class CommandGroup(BaseModel):
         cmd.incr_line_count(line)
 
     async def _process_stdxxx(
-        self, cmd: Command, strategy: ProcessingStrategy, stream: AsyncIterable[bytes], callbacks: CommandCB
+        self,
+        cmd: Command,
+        strategy: ProcessingStrategy,
+        stream: AsyncIterable[bytes],
+        callbacks: CommandCB,
     ) -> None:
         await callbacks.on_start(cmd)
 
@@ -202,7 +210,10 @@ class CommandGroup(BaseModel):
             with anyio.fail_after(self.timeout):
                 async with (
                     await anyio.open_process(
-                        command=cmd.cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                        command=cmd.cmd,
+                        env=env,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
                     ) as process,
                     anyio.create_task_group() as tg,
                 ):
@@ -294,10 +305,10 @@ def read_commands_toml(filename: Union[str, Path]) -> list[CommandGroup]:
 
         commands = OrderedDict()
         for cmd_data in group_data.get("commands", []):
-            name, exec = _validate_mandatory_keys(cmd_data, ["name", "exec"], f"command group {group_name}")
+            name, exec_str = _validate_mandatory_keys(cmd_data, ["name", "exec"], f"command group {group_name}")
             setenv, passenv = _get_optional_keys(cmd_data, ["setenv", "passenv"], default=None)
 
-            commands[name] = Command(name=name, cmd=exec, setenv=setenv, passenv=passenv)
+            commands[name] = Command(name=name, cmd=exec_str, setenv=setenv, passenv=passenv)
         command_group = CommandGroup(
             name=group_name,
             desc=group_desc,
