@@ -2,7 +2,7 @@
 
 from collections import OrderedDict
 from statistics import mean
-from typing import Any, Literal, Union
+from typing import Any, Literal, Union, cast
 
 import pytest
 
@@ -131,7 +131,7 @@ def generate_command_groups(
     num_output_lines: Union[int, list[int]],
     serial: Union[bool, list[bool]],
     success: Union[bool, list[bool]],
-) -> CommandGroup:
+) -> list[CommandGroup]:
     num_groups, num_cmds, num_output_lines, serial, success = _norm_generate_command_groups(
         num_groups,
         num_cmds,
@@ -172,4 +172,4 @@ def anyio_backend(request: pytest.FixtureRequest) -> AnyIOBackendT:
     ],
 )
 def anyio_backend_asyncio(request: pytest.FixtureRequest) -> tuple[str, dict[str, Any]]:
-    return request.param
+    return cast(tuple[str, dict[str, Any]], request.param)

@@ -1,0 +1,31 @@
+[package]
+name = "par_run"
+version = "0.5.0"
+edition = "2021"
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "par_run"
+# rlib is needed to be able to separate tests into tests/
+crate-type = ["cdylib", "rlib"]
+
+
+[dependencies]
+pyo3 = { version = "*"}
+pyo3-log = { version = "*" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[package.metadata.cargo-llvm-cov]
+# Ignore directories and files that are not part of the Rust source code
+ignore-filename-regex = "(.cargo|py_integ|py_src|py_tests|dist|docs|downloads|runnable|site|target|\\.git|\\.github)/"
+ignore-glob = ["py_integ/*", "py_src/*", "py_tests/*", "dist/*", "docs/*", "downloads/*", "runnable/*", "site/*", "target/*"]
+
+[dev-dependencies]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+
+[features]

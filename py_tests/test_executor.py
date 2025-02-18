@@ -17,12 +17,11 @@ from par_run.executor import (
 from par_run.executor import (
     internal_error_ret_code as internal_err_ret_code,
 )
-from py_tests.conftest import AnyIOBackendT
 
 
 class CommanCBTest:
     def __init__(self) -> None:
-        self.output = []
+        self.output: list[str] = []
         self.exit_code = 0
 
     async def on_start(self, cmd: Command) -> None:
@@ -60,7 +59,6 @@ def test_command_set_running() -> None:
 
 @pytest.mark.parametrize("style", [ProcessingStrategy.ON_COMP, ProcessingStrategy.ON_RECV])
 def test_command_group_parallel(
-    anyio_backend: AnyIOBackendT,  # noqa: ARG001
     mock_command_groups_par_success: list[CommandGroup],
     style: ProcessingStrategy,
 ) -> None:
@@ -77,7 +75,6 @@ def test_command_group_parallel(
 
 @pytest.mark.parametrize("style", [ProcessingStrategy.ON_COMP, ProcessingStrategy.ON_RECV])
 def test_command_group_serial(
-    anyio_backend: AnyIOBackendT,  # noqa: ARG001
     mock_command_groups_serial_success: list[CommandGroup],
     style: ProcessingStrategy,
 ) -> None:
@@ -94,7 +91,6 @@ def test_command_group_serial(
 
 @pytest.mark.parametrize("style", [ProcessingStrategy.ON_COMP, ProcessingStrategy.ON_RECV])
 def test_command_group_serial_part_fail(
-    anyio_backend: AnyIOBackendT,  # noqa: ARG001
     mock_command_groups_par_part_fail: list[CommandGroup],
     style: ProcessingStrategy,
 ) -> None:
@@ -121,7 +117,7 @@ def test_command_group_serial_part_fail(
         assert all(cmd.unflushed == [] for cmd in group.cmds.values())
 
 
-def test_command_group_timeout_on_recv(anyio_backend_asyncio) -> None:  # noqa: ARG001, ANN001
+def test_command_group_timeout_on_recv() -> None:
     command1 = Command(name="test1", cmd="echo 'Hello, World!' && sleep 2 && exit 0", passenv=["PATH"])
     commands = OrderedDict()
     commands[command1.name] = command1
@@ -135,7 +131,7 @@ def test_command_group_timeout_on_recv(anyio_backend_asyncio) -> None:  # noqa: 
     assert all(cmd.status == CommandStatus.TIMEOUT for cmd in group.cmds.values())
 
 
-def test_command_group_timeout_on_comp(anyio_backend_asyncio) -> None:  # noqa: ARG001, ANN001
+def test_command_group_timeout_on_comp() -> None:
     command1 = Command(name="test1", cmd="echo 'Hello, World!' && sleep 2 && exit 0", passenv=["PATH"])
     commands = OrderedDict()
     commands[command1.name] = command1
@@ -151,7 +147,6 @@ def test_command_group_timeout_on_comp(anyio_backend_asyncio) -> None:  # noqa: 
 
 @pytest.mark.parametrize("style", [ProcessingStrategy.ON_COMP, ProcessingStrategy.ON_RECV])
 async def test_command_group_async(
-    anyio_backend: AnyIOBackendT,  # noqa: ARG001
     mock_command_groups_par_success: list[CommandGroup],
     style: ProcessingStrategy,
 ) -> None:
@@ -168,7 +163,6 @@ async def test_command_group_async(
 
 @pytest.mark.parametrize("style", [ProcessingStrategy.ON_COMP, ProcessingStrategy.ON_RECV])
 async def test_command_group_async_part_fail(
-    anyio_backend: AnyIOBackendT,  # noqa: ARG001
     mock_command_groups_par_part_fail: list[CommandGroup],
     style: ProcessingStrategy,
 ) -> None:

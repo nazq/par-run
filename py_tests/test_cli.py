@@ -38,7 +38,7 @@ def test_run(mocker: MockerFixture, mock_command_groups_par_success: list[Comman
     assert result.exit_code == 0
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_on_start(mocker: MockerFixture) -> None:
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
@@ -47,7 +47,7 @@ async def test_on_start(mocker: MockerFixture) -> None:
     mock_rich_print.assert_called_once()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_on_recv(mocker: MockerFixture) -> None:
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
@@ -56,7 +56,7 @@ async def test_on_recv(mocker: MockerFixture) -> None:
     mock_rich_print.assert_called_once_with("Hello, World!")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("status", [CommandStatus.SUCCESS, CommandStatus.FAILURE])
 async def test_on_term(mocker: MockerFixture, status: CommandStatus) -> None:
     mock_rich_print = mocker.patch("par_run.cli.rich.print")
@@ -208,7 +208,7 @@ def test_run_with_fails(mocker: MockerFixture, mock_command_groups_par_part_fail
 def test_run_with_specific_cmds(mocker: MockerFixture, mock_command_groups_par_success: list[CommandGroup]) -> None:
     mocker.patch("par_run.cli.read_commands_toml", return_value=[mock_command_groups_par_success])
     mocker.patch("par_run.cli.rich.print")
-    result = runner.invoke(cli_app, ["run", "--cmds", mock_command_groups_par_success[0].cmds[0].name])
+    result = runner.invoke(cli_app, ["run", "--cmds", mock_command_groups_par_success[0].cmds["test_0"].name])
     assert result.exit_code == 0
     # Add additional assertions to check if the command was filtered correctly
 
@@ -395,7 +395,7 @@ def test_enums() -> None:
         assert isinstance(backend.value, str)
         assert str(backend) == backend.value
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_command_cb_comp_success(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
@@ -406,7 +406,7 @@ async def test_command_cb_comp_success(mocker: MockerFixture) -> None:
     await cb.on_term(command, 0)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_command_cb_comp_fail(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnComp()
@@ -417,7 +417,7 @@ async def test_command_cb_comp_fail(mocker: MockerFixture) -> None:
     await cb.on_term(command, 1)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_command_cb_recv_success(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnRecv()
@@ -428,7 +428,7 @@ async def test_command_cb_recv_success(mocker: MockerFixture) -> None:
     await cb.on_term(command, 0)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_command_cb_recv_fail(mocker: MockerFixture) -> None:
     mocker.patch("par_run.cli.rich.print")
     cb = CLICommandCBOnRecv()

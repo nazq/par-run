@@ -1,10 +1,8 @@
 from collections import OrderedDict
-from collections.abc import Generator
 
 import pytest
 import requests
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
 from pytest_mock import MockerFixture
 
 from par_run.executor import Command, CommandGroup
@@ -13,14 +11,9 @@ from par_run.web import ws_app
 from .conftest import AnyIOBackendT
 
 
-@pytest.fixture()
-def test_client(anyio_backend: AnyIOBackendT) -> Generator[TestClient, None, None]:
+@pytest.fixture
+def test_client(anyio_backend: AnyIOBackendT) -> TestClient:
     return TestClient(ws_app, backend=anyio_backend[0], backend_options=anyio_backend[1])
-
-
-@pytest.fixture()
-def async_client() -> Generator[AsyncClient, None, None]:
-    return AsyncClient(app=ws_app, base_url="http://test")
 
 
 def test_ws_main() -> None:
@@ -30,7 +23,7 @@ def test_ws_main() -> None:
     assert response.status_code == http_ok
 
 
-def test_ws_full(test_client: TestClient, mocker: MockerFixture, anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001
+def test_ws_full(test_client: TestClient, mocker: MockerFixture) -> None:
     command1 = Command(name="test1", cmd="echo 'Hello, World!'")
     command2 = Command(name="test2", cmd="echo 'World, Hey!'")
     commands = OrderedDict()
@@ -45,7 +38,7 @@ def test_ws_full(test_client: TestClient, mocker: MockerFixture, anyio_backend: 
         assert _res
 
 
-def test_ws_full_part_fail(test_client: TestClient, mocker: MockerFixture, anyio_backend: AnyIOBackendT) -> None:  # noqa: ARG001
+def test_ws_full_part_fail(test_client: TestClient, mocker: MockerFixture) -> None:
     command1 = Command(name="test1", cmd="echo 'Hello, World!'")
     command2 = Command(name="test2", cmd="echo 'World, Hey!' && exit 1")
     commands = OrderedDict()
